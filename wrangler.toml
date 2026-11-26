@@ -2,6 +2,10 @@ name = "mynav"
 main = "worker/entry.bundle.js"
 compatibility_date = "2026-11-01"
 
+# Workers Builds 执行 npx wrangler deploy 时自动先编译 Worker 与前端静态资源
+[build]
+command = "npm run build"
+
 # 静态前端（SPA）：/api/* 先走 Worker，其余直接由资产层服务（安全头经 public/_headers）
 [assets]
 directory = "frontend/dist"
