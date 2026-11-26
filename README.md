@@ -2,7 +2,7 @@
 
 美观现代的个人导航页，**部署在 Cloudflare Workers（免费层，含 Cron 失联告警）**，自带防护；配合以 **OpenWrt 插件形式编进路由器固件的采集器**（唯一采集端，NAS 数据经 SSH 回采、NAS 零安装），实现路由器/NAS/OpenClash 的在线状态、系统异常告警、异常卡片高亮、当前流量与历史流量趋势。
 
-**线上入口：https://nav.403333.xyz**（源码仓库 `ybjbox/MyNav` 私有；push 到 main 自动部署）
+**线上入口：https://nav.403333.xyz**（源码仓库 `ybjbox/MyNav`；push 到 main 自动部署）
 
 > 设计语言 "Aurora Glass"：深色玻璃拟态 + 极光绿强调色；动效克制（150–400ms，尊重 reduced-motion）。视觉规范见 `原型/NAV.html`。
 
