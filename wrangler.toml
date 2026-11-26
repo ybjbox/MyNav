@@ -1,0 +1,51 @@
+name = "mynav"
+main = "worker/entry.bundle.js"
+compatibility_date = "2026-11-01"
+
+# 静态前端（SPA）：/api/* 先走 Worker，其余直接由资产层服务（安全头经 public/_headers）
+[assets]
+directory = "frontend/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/", "/index.html", "/assets/*"]
+
+# Cron：每 5 分钟失联检查；每天 04:40 清理 31 天前的采样
+[triggers]
+crons = ["*/5 * * * *", "40 4 * * *"]
+
+# ---------- 本地开发绑定（nav-db / nav-kv） ----------
+[[d1_databases]]
+binding = "DB"
+database_name = "nav-db"
+database_id = "local-nav-db"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "local-nav-kv"
+
+# Cloudflare Workers AI（免费层每日 10,000 Neurons，用于分析路由器与 OpenClash 日志）
+[ai]
+binding = "AI"
+
+# 密钥通过 `wrangler secret put` 注入生产（JWT_SECRET / COLLECTOR_TOKEN / ADMIN_PASSWORD_HASH）
+# 本地开发变量放 .dev.vars（不入库）
+
+# 可观测性：日志全量采集 + Traces，关闭异常自动检测
+[observability]
+enabled = true
+head_sampling_rate = 1
+redact_query_string = true
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 1
+persist = true
+
+[observability.issue_detection]
+enabled = false

@@ -1,0 +1,108 @@
+/* ============ NAV 设计 token（与 原型/NAV.html 同源） ============ */
+:root {
+  /* 中性层（冷调深色，非纯黑） */
+  --bg: #0b0f14;
+  --bg-raise: #0f151c;
+  --card-glass: rgba(255, 255, 255, 0.1);
+  --card-glass-strong: rgba(255, 255, 255, 0.2);
+  --surface: rgba(255, 255, 255, 0.045);
+  --surface-2: rgba(255, 255, 255, 0.075);
+  --fg: #e9eef3;
+  --muted: #93a1af;
+  --faint: #5f6d7a;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-2: rgba(255, 255, 255, 0.16);
+
+  /* 唯一强调色：极光绿松石（品牌/主操作/数据高亮） */
+  --accent: #43e0a0;
+  --accent-ink: #0b0f14;
+  --accent-dim: rgba(67, 224, 160, 0.13);
+  --accent-glow: rgba(67, 224, 160, 0.35);
+
+  /* 语义色 */
+  --success: #43e0a0;
+  --warn: #e6b357;
+  --danger: #e5646c;
+  --warn-dim: rgba(230, 179, 87, 0.12);
+  --danger-dim: rgba(229, 100, 108, 0.12);
+
+  /* 字体与字阶（统一 UI 字体，数字通过 tabular-nums 对齐，避免混用等宽/宋体导致割裂与锯齿） */
+  --font-ui: "MiSans", "MiSans VF", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-num: var(--font-ui);
+  --font-mono: ui-monospace, "SF Mono", Consolas, monospace;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-clock: clamp(44px, 6vw, 60px);
+
+  /* 形状与动效（HyperOS 同心圆角与弹性缓动） */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 22px;
+  --r-full: 999px;
+  --speed-1: 150ms;
+  --speed-2: 240ms;
+  --speed-3: 400ms;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.25);
+  --shadow-2: 0 24px 64px rgba(0, 0, 0, 0.5);
+  --blur: 14px;
+  --rail-bg: rgba(18, 22, 30, 0.72);
+  --rail-border: rgba(255, 255, 255, 0.14);
+  --pill-bg: rgba(255, 255, 255, 0.86);
+  --pill-fg: #1c2530;
+  --pill-muted: #6c7a89;
+}
+
+/* 有壁纸时：玻璃面整体加厚（WeTab/Infinity 式对比度保障）+ 白玻璃卡 */
+html.has-wallpaper {
+  --surface: rgba(255, 255, 255, 0.1);
+  --surface-2: rgba(255, 255, 255, 0.17);
+  --border: rgba(255, 255, 255, 0.14);
+  --border-2: rgba(255, 255, 255, 0.26);
+  --card-glass: rgba(255, 255, 255, 0.16);
+  --card-glass-strong: rgba(255, 255, 255, 0.28);
+  --shadow-1: 0 2px 6px rgba(0, 0, 0, 0.28), 0 16px 40px rgba(0, 0, 0, 0.36);
+}
+html.has-wallpaper[data-theme="light"] {
+  --card-glass: rgba(255, 255, 255, 0.6);
+  --card-glass-strong: rgba(255, 255, 255, 0.78);
+  --surface: rgba(255, 255, 255, 0.58);
+  --surface-2: rgba(255, 255, 255, 0.85);
+  --border: rgba(16, 26, 36, 0.16);
+  --border-2: rgba(16, 26, 36, 0.3);
+  --shadow-1: 0 2px 6px rgba(16, 26, 36, 0.12), 0 16px 40px rgba(16, 26, 36, 0.14);
+}
+
+/* 面板（弹层/菜单）：WeTab 式白面板，深浅主题一致 */
+:root {
+  --panel-bg: rgba(255, 255, 255, 0.96);
+  --panel-fg: #1c2530;
+  --panel-muted: #5c6b78;
+  --panel-border: rgba(16, 26, 36, 0.12);
+}
+
+html[data-theme="light"] {
+  --bg: #f4f6f8;
+  --bg-raise: #ffffff;
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-2: rgba(255, 255, 255, 0.92);
+  --fg: #182028;
+  --muted: #5c6b78;
+  --faint: #93a1ad;
+  --border: rgba(16, 26, 36, 0.1);
+  --border-2: rgba(16, 26, 36, 0.2);
+  --accent: #0b8f5f;
+  --accent-ink: #ffffff;
+  --accent-dim: rgba(11, 143, 95, 0.1);
+  --accent-glow: rgba(11, 143, 95, 0.25);
+  --success: #0b8f5f;
+  --warn: #a9700f;
+  --danger: #c2454d;
+  --warn-dim: rgba(169, 112, 15, 0.1);
+  --danger-dim: rgba(194, 69, 77, 0.1);
+  --shadow-1: 0 1px 2px rgba(16, 26, 36, 0.08), 0 10px 28px rgba(16, 26, 36, 0.08);
+  --shadow-2: 0 24px 64px rgba(16, 26, 36, 0.18);
+}

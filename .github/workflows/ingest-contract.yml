@@ -1,0 +1,30 @@
+name: Ingest Contract Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/handlers.ts'
+      - 'scripts/check-ingest-contract.mjs'
+  pull_request:
+    paths:
+      - 'worker/handlers.ts'
+      - 'scripts/check-ingest-contract.mjs'
+
+jobs:
+  contract:
+    name: Ingest contract (cloud ↔ Go)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出 MyNav
+        uses: actions/checkout@v4
+
+      - name: 准备 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 拉取公开仓 metrics.go 并校验字段一致
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/ybjbox/openwrt-packages/main/nav-collector/src/internal/metrics/metrics.go" -o /tmp/metrics.go
+          node scripts/check-ingest-contract.mjs /tmp/metrics.go

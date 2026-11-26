@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="zh-CN" data-zcode-design data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AuroraNav · 个人导航</title>
+<style>
+/* ============ 设计 token ============ */
+:root{
+  /* 中性层（冷调深色，非纯黑） */
+  --bg:#0b0f14;
+  --bg-raise:#0f151c;
+  --surface:rgba(255,255,255,.045);
+  --surface-2:rgba(255,255,255,.075);
+  --fg:#e9eef3;
+  --muted:#93a1af;
+  --faint:#5f6d7a;
+  --border:rgba(255,255,255,.08);
+  --border-2:rgba(255,255,255,.16);
+
+  /* 唯一强调色：极光绿松石（品牌/主操作/数据高亮，每屏 ≤2 处可见使用） */
+  --accent:#43e0a0;
+  --accent-ink:#0b0f14;          /* 强调色之上的文字 */
+  --accent-dim:rgba(67,224,160,.13);
+  --accent-glow:rgba(67,224,160,.35);
+
+  /* 语义色 */
+  --success:#43e0a0;
+  --warn:#e6b357;
+  --danger:#e5646c;
+  --warn-dim:rgba(230,179,87,.12);
+  --danger-dim:rgba(229,100,108,.12);
+
+  /* 字体与字阶 */
+  --font-ui:system-ui,-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --font-num:ui-monospace,"SF Mono",Segoe UI Mono,Consolas,monospace;
+  --fs-xs:12px; --fs-sm:13px; --fs-md:14px; --fs-lg:16px; --fs-xl:20px; --fs-clock:clamp(44px,6vw,60px);
+
+  /* 形状与动效 */
+  --r-sm:8px; --r-md:14px; --r-lg:20px; --r-full:999px;
+  --speed-1:150ms; --speed-2:240ms; --speed-3:400ms;
+  --ease:cubic-bezier(.2,0,0,1);
+  --shadow-1:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.25);
+  --blur:14px;
+}
+html[data-theme="light"]{
+  --bg:#f4f6f8;
+  --bg-raise:#ffffff;
+  --surface:rgba(255,255,255,.72);
+  --surface-2:rgba(255,255,255,.92);
+  --fg:#182028;
+  --muted:#5c6b78;
+  --faint:#93a1ad;
+  --border:rgba(16,26,36,.10);
+  --border-2:rgba(16,26,36,.2);
+  --accent:#0b8f5f;
+  --accent-ink:#ffffff;
+  --accent-dim:rgba(11,143,95,.10);
+  --accent-glow:rgba(11,143,95,.25);
+  --success:#0b8f5f;
+  --warn:#a9700f;
+  --danger:#c2454d;
+  --warn-dim:rgba(169,112,15,.10);
+  --danger-dim:rgba(194,69,77,.10);
+  --shadow-1:0 1px 2px rgba(16,26,36,.08),0 10px 28px rgba(16,26,36,.08);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--fg);
+  font-family:var(--font-ui); font-size:var(--fs-md); line-height:1.55;
+  min-height:100vh; -webkit-font-smoothing:antialiased;
+}
+/* ============ 极光环境层（签名元素：静态渐变，避免持续重绘开销） ============ */
+.aurora{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.aurora::before,.aurora::after{
+  content:"";position:absolute;border-radius:50%;filter:blur(70px);opacity:.17;
+}
+.aurora::before{width:56vw;height:44vh;left:-12vw;top:-18vh;
+  background:radial-gradient(closest-side, var(--accent-glow), transparent 70%)}
+.aurora::after{width:44vw;height:40vh;right:-10vw;bottom:-16vh;opacity:.11;
+  background:radial-gradient(closest-side, rgba(126,120,255,.5), rgba(67,224,160,.25) 55%, transparent 72%)}
+
+/* ============ 骨架布局 ============ */
+.app{position:relative;z-index:1;max-width:1180px;margin:0 auto;padding:0 clamp(16px,4vw,40px) 48px}
+
+/* 顶栏 */
+.topbar{display:flex;align-items:center;gap:14px;padding:18px 0 10px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:650;letter-spacing:.2px;font-size:15px}
+.brand .mark{width:26px;height:26px;border-radius:var(--r-sm);background:var(--accent-dim);
+  display:grid;place-items:center;color:var(--accent)}
+.topbar .spacer{flex:1}
+.iconbtn{position:relative;width:36px;height:36px;border-radius:var(--r-sm);
+  border:1px solid var(--border);background:var(--surface);color:var(--muted);
+  display:grid;place-items:center;cursor:pointer;transition:color var(--speed-1) var(--ease),border-color var(--speed-1) var(--ease),transform var(--speed-1) var(--ease)}
+.iconbtn:hover{color:var(--fg);border-color:var(--border-2);transform:translateY(-1px)}
+.iconbtn .badge{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;padding:0 4px;
+  border-radius:var(--r-full);background:var(--danger);color:#fff;font-size:10px;font-weight:700;
+  display:grid;place-items:center;font-family:var(--font-num)}
+.btn{height:36px;padding:0 14px;border-radius:var(--r-sm);border:1px solid var(--border);
+  background:var(--surface);color:var(--fg);font-size:var(--fs-md);font-family:var(--font-ui);
+  cursor:pointer;transition:border-color var(--speed-1) var(--ease),transform var(--speed-1) var(--ease),background var(--speed-1) var(--ease)}
+.btn:hover{border-color:var(--border-2);transform:translateY(-1px)}
+.btn:focus-visible,.iconbtn:focus-visible,.card:focus-visible,.chip:focus-visible,.search:focus-within{
+  outline:2px solid var(--accent);outline-offset:2px}
+
+/* Hero：时间与检索 */
+.hero{display:flex;align-items:flex-end;gap:24px;flex-wrap:wrap;padding:26px 0 6px}
+.clock{font-size:var(--fs-clock);font-weight:250;letter-spacing:-.02em;line-height:1;
+  font-variant-numeric:tabular-nums;font-family:var(--font-num)}
+.clock .sec{font-size:20px;color:var(--faint);font-weight:400;margin-left:6px}
+.heroline{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.greet{font-size:var(--fs-xl);font-weight:650;letter-spacing:.2px}
+.date{color:var(--muted);font-size:var(--fs-sm)}
+.hero .right{margin-left:auto;display:flex;flex-direction:column;gap:10px;min-width:min(420px,100%)}
+.search{position:relative;display:flex;align-items:center;gap:10px;height:46px;padding:0 12px 0 14px;
+  border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface);
+  backdrop-filter:blur(var(--blur));-webkit-backdrop-filter:blur(var(--blur));
+  transition:border-color var(--speed-1) var(--ease)}
+.search:focus-within{border-color:var(--border-2)}
+.search svg{color:var(--muted);flex:none}
+.search input{flex:1;border:0;outline:0;background:transparent;color:var(--fg);
+  font:inherit;font-size:var(--fs-lg);min-width:0}
+.search input::placeholder{color:var(--faint)}
+.search kbd{border:1px solid var(--border);border-bottom-width:2px;border-radius:6px;
+  padding:1px 7px;font-size:11px;color:var(--faint);font-family:var(--font-num);white-space:nowrap}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{height:28px;padding:0 12px;border-radius:var(--r-full);border:1px solid var(--border);
+  background:transparent;color:var(--muted);font-size:var(--fs-sm);font-family:var(--font-ui);
+  cursor:pointer;transition:color var(--speed-1) var(--ease),border-color var(--speed-1) var(--ease),background var(--speed-1) var(--ease)}
+.chip:hover{color:var(--fg);border-color:var(--border-2)}
+.chip[aria-pressed="true"]{background:var(--accent-dim);border-color:transparent;color:var(--accent);font-weight:600}
+
+/* 告警条 */
+.alertbar{display:none;align-items:center;gap:10px;margin:14px 0 4px;padding:10px 14px;
+  border-radius:var(--r-md);background:var(--warn-dim);border:1px solid transparent;
+  color:var(--fg);font-size:var(--fs-sm)}
+.alertbar.show{display:flex}
+.alertbar svg{color:var(--warn);flex:none}
+.alertbar .txt b{font-weight:650}
+.alertbar .meta{color:var(--muted);font-family:var(--font-num);font-size:var(--fs-xs)}
+.alertbar .dismiss{margin-left:auto;border:0;background:none;color:var(--muted);cursor:pointer;
+  width:28px;height:28px;border-radius:var(--r-sm);display:grid;place-items:center;
+  transition:color var(--speed-1) var(--ease)}
+.alertbar .dismiss:hover{color:var(--fg)}
+
+/* 分组与卡片 */
+section{margin-top:34px}
+.group-head{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+.eyebrow{font-size:var(--fs-xs);font-weight:700;letter-spacing:.14em;color:var(--faint);text-transform:uppercase}
+.group-head .title{font-size:var(--fs-lg);font-weight:650;letter-spacing:.2px}
+.group-head .count{color:var(--faint);font-size:var(--fs-xs);font-family:var(--font-num)}
+.group-head .note{margin-left:auto;color:var(--faint);font-size:var(--fs-xs)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(152px,1fr));gap:12px}
+.card{position:relative;display:flex;flex-direction:column;gap:10px;padding:14px;
+  border-radius:var(--r-md);border:1px solid var(--border);
+  background:var(--surface);backdrop-filter:blur(var(--blur));-webkit-backdrop-filter:blur(var(--blur));
+  color:var(--fg);text-decoration:none;cursor:pointer;box-shadow:var(--shadow-1);
+  transition:transform var(--speed-1) var(--ease),border-color var(--speed-1) var(--ease),opacity var(--speed-1) var(--ease)}
+.card::after{content:"";position:absolute;inset:0;border-radius:inherit;opacity:0;
+  box-shadow:0 0 0 1px var(--border-2),0 12px 32px rgba(0,0,0,.35);
+  transition:opacity var(--speed-1) var(--ease);pointer-events:none}
+.card:hover{transform:translateY(-2px)}
+.card:hover::after{opacity:1}
+.card .ico{width:22px;height:22px;color:var(--muted);transition:color var(--speed-1) var(--ease)}
+.card:hover .ico{color:var(--fg)}
+.card .name{font-size:var(--fs-md);font-weight:600;letter-spacing:.1px}
+.card .desc{font-size:var(--fs-xs);color:var(--faint);line-height:1.4;min-height:2.1em}
+.card .stat{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--muted);
+  font-family:var(--font-num)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--success);position:relative;flex:none}
+.dot::after{content:"";position:absolute;inset:-4px;border-radius:50%;
+  background:radial-gradient(closest-side,var(--accent-glow),transparent 72%);
+  animation:breathe 2.6s var(--ease) infinite}
+.dot.off{background:var(--danger)}
+.dot.off::after{background:radial-gradient(closest-side,var(--danger-dim),transparent 72%);animation:none}
+.dot.warn{background:var(--warn)}
+.dot.warn::after{background:radial-gradient(closest-side,var(--warn-dim),transparent 72%);animation:none}
+@keyframes breathe{0%,100%{opacity:.9;transform:scale(.85)}50%{opacity:.35;transform:scale(1.15)}}
+
+/* 入场动效（交错上浮，仅 transform+opacity） */
+.enter{opacity:0;transform:translateY(10px);animation:rise var(--speed-3) var(--ease) forwards}
+@keyframes rise{to{opacity:1;transform:none}}
+
+/* 监控卡 */
+.devgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.dev{position:relative;padding:18px;border-radius:var(--r-lg);border:1px solid var(--border);
+  background:var(--surface);backdrop-filter:blur(var(--blur));-webkit-backdrop-filter:blur(var(--blur));
+  box-shadow:var(--shadow-1);overflow:hidden}
+.dev::before{content:"";position:absolute;inset:0;border-radius:inherit;opacity:0;
+  box-shadow:inset 0 0 0 1px var(--warn),inset 0 0 22px var(--warn-dim);pointer-events:none}
+.dev.alert::before{opacity:1;animation:pulse 2.8s var(--ease) infinite}
+@keyframes pulse{0%,100%{opacity:.9}50%{opacity:.35}}
+.dev-head{display:flex;align-items:center;gap:10px}
+.dev-head svg{width:20px;height:20px;color:var(--muted)}
+.dev-head .dname{font-weight:650;font-size:var(--fs-lg)}
+.dev-head .tag{font-size:var(--fs-xs);color:var(--muted);border:1px solid var(--border);
+  padding:1px 8px;border-radius:var(--r-full);font-family:var(--font-num)}
+.dev-head .up{margin-left:auto;font-size:var(--fs-xs);color:var(--muted);font-family:var(--font-num)}
+.rates{display:flex;gap:26px;margin:14px 0 6px}
+.rate{display:flex;align-items:baseline;gap:8px}
+.rate svg{width:15px;height:15px;color:var(--muted);align-self:center}
+.rate .val{font-family:var(--font-num);font-variant-numeric:tabular-nums;font-size:22px;font-weight:600;letter-spacing:-.01em}
+.rate .unit{color:var(--faint);font-size:var(--fs-xs);font-family:var(--font-num)}
+.rate .lbl{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
+@media (max-width:420px){.rates{gap:16px}.rate .val{font-size:19px}}
+.rings{display:flex;gap:18px;margin-top:12px;flex-wrap:wrap}
+.ring{display:flex;align-items:center;gap:8px}
+.ring svg{width:44px;height:44px}
+.ring .p{font-size:var(--fs-sm);font-weight:600;font-family:var(--font-num);font-variant-numeric:tabular-nums}
+.ring .k{font-size:var(--fs-xs);color:var(--muted)}
+.spark{margin-top:12px}
+.spark svg{display:block;width:100%;height:56px}
+.dev-foot{display:flex;align-items:center;margin-top:10px}
+.dev-foot .temp{font-size:var(--fs-xs);color:var(--muted);font-family:var(--font-num)}
+.dev-foot .trend{margin-left:auto;display:inline-flex;align-items:center;gap:4px;
+  font-size:var(--fs-sm);color:var(--accent);background:none;border:0;cursor:pointer;
+  font-family:var(--font-ui);padding:4px 2px;border-radius:6px}
+.dev-foot .trend:hover{text-decoration:underline}
+
+/* 趋势弹层 */
+.overlay{position:fixed;inset:0;z-index:20;display:none;align-items:center;justify-content:center;
+  background:rgba(5,8,12,.6);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding:20px}
+.overlay.show{display:flex}
+.modal{width:min(760px,100%);max-height:86vh;overflow:auto;border-radius:var(--r-lg);
+  border:1px solid var(--border);background:var(--bg-raise);box-shadow:0 24px 64px rgba(0,0,0,.5);
+  padding:22px}
+.modal-head{display:flex;align-items:center;gap:10px}
+.modal-head .t{font-size:var(--fs-lg);font-weight:650}
+.modal-head .close{margin-left:auto}
+.range{display:flex;gap:8px;margin:16px 0}
+.chart{width:100%;height:220px;display:block}
+.legend{display:flex;gap:16px;margin-top:10px;font-size:var(--fs-xs);color:var(--muted)}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;background:var(--accent);margin-right:6px;vertical-align:middle}
+.legend i.alt{background:var(--faint)}
+.daystats{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-top:16px}
+.daystats .d{border:1px solid var(--border);border-radius:var(--r-sm);padding:8px;text-align:center}
+.daystats .d .k{font-size:11px;color:var(--faint)}
+.daystats .d .v{font-size:var(--fs-sm);font-weight:600;font-family:var(--font-num);font-variant-numeric:tabular-nums}
+
+footer{margin-top:44px;color:var(--faint);font-size:var(--fs-xs);display:flex;gap:10px;align-items:center}
+footer .livedot{width:6px;height:6px;border-radius:50%;background:var(--success)}
+
+/* 移动端 */
+@media (max-width:760px){
+  .devgrid{grid-template-columns:1fr}
+  .hero{align-items:stretch;flex-direction:column}
+  .hero .right{margin-left:0}
+  .topbar .hide-m{display:none}
+  .daystats{grid-template-columns:repeat(4,1fr)}
+}
+/* reduced-motion：剥离位移/缩放，保留透明度反馈 */
+@media (prefers-reduced-motion:reduce){
+  .dot::after,.dev.alert::before{animation:none}
+  .enter{opacity:1;transform:none;animation:none}
+  *{transition-duration:1ms!important}
+}
+</style>
+</head>
+<body>
+<div class="aurora" aria-hidden="true"></div>
+
+<svg style="display:none" aria-hidden="true">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M16.6 16.6 21 21"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 2 8 2 8H4s2-1 2-8"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M4 12h14"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/><circle cx="20" cy="12" r="0"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3.5 22 20H2Z"/><path d="M12 10v4.5"/><circle cx="12" cy="17.2" r=".4"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v15M6 13.5 12 19.5l6-6"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 20V5M6 10.5 12 4.5l6 6"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="i-router" viewBox="0 0 24 24"><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M12 14V9"/><circle cx="12" cy="6.5" r="2"/><path d="M6.5 17h.5M9.5 17h.5"/></symbol>
+    <symbol id="i-nas" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="8.5" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="8.5" cy="13" r="1" fill="currentColor" stroke="none"/><path d="M12 8h5M12 13h5M7.5 17.5h9"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.8 3.4 2.8 14.6 0 18-2.8-3.4-2.8-14.6 0-18Z"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 7.5 8.5 6 8.5-6"/></symbol>
+    <symbol id="i-tv" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="m8 3.5 3.5 3.5L15 3.5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8.5 5.5v13l10-6.5Z"/></symbol>
+    <symbol id="i-git" viewBox="0 0 24 24"><circle cx="6.5" cy="6" r="2.5"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="6" r="2.5"/><path d="M6.5 8.5v7M17.5 8.5c0 5-6.5 4-8.7 6.6"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a6.5 6.5 0 1 1 6.2-8.4h2.3a4.2 4.2 0 1 1 0 8.4Z"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="M21 8.2a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4a2 2 0 0 0-1 1.7v7.6a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.7Z"/><path d="M3.3 7.3 12 12l8.7-4.7M12 22V12"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10.8 9-7.3 9 7.3M5.5 9.5V20h13V9.5"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2Z"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4.5"/><path d="m11 12 9.5-9.5M17 6l2.5 2.5M14 9l2 2"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m5 7 5 5-5 5M12 19h7"/></symbol>
+    <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5Z"/><path d="m3 13 9 5 9-5"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+  <!-- 顶栏 -->
+  <header class="topbar" data-od-id="topbar">
+    <div class="brand"><span class="mark"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-activity"/></svg></span>AuroraNav</div>
+    <div class="spacer"></div>
+    <button class="iconbtn hide-m" id="themeBtn" title="切换主题" aria-label="切换主题"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sun"/></svg></button>
+    <button class="iconbtn" title="告警" aria-label="告警，2 条活动"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-bell"/></svg><span class="badge">2</span></button>
+    <button class="iconbtn" title="管理" aria-label="管理设置"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-sliders"/></svg></button>
+    <button class="btn" style="font-weight:600">登录</button>
+  </header>
+
+  <!-- Hero：时间 + 检索 -->
+  <div class="hero" data-od-id="hero">
+    <div>
+      <div class="clock" id="clock">21:36<span class="sec">07</span></div>
+      <div class="heroline"><span class="greet" id="greet">晚上好</span><span class="date" id="date">11月21日 周五</span></div>
+    </div>
+    <div class="right">
+      <label class="search">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><use href="#i-search"/></svg>
+        <input id="q" type="search" placeholder="搜索或输入网址" aria-label="搜索或输入网址">
+        <kbd>/</kbd>
+      </label>
+      <div class="chips" role="group" aria-label="搜索引擎">
+        <button class="chip" aria-pressed="true">Google</button>
+        <button class="chip" aria-pressed="false">Bing</button>
+        <button class="chip" aria-pressed="false">GitHub</button>
+        <button class="chip" aria-pressed="false">B站</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 告警条 -->
+  <div class="alertbar show" id="alertbar" role="status" data-od-id="alertbar">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-warn"/></svg>
+    <span class="txt"><b>飞牛 NAS</b>&nbsp;磁盘用量 91%，超过阈值 90%</span>
+    <span class="meta">已持续 5h 54m</span>
+    <button class="dismiss" aria-label="关闭提醒"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><use href="#i-x"/></svg></button>
+  </div>
+
+  <!-- 导航分组 -->
+  <section data-od-id="nav-frequent">
+    <div class="group-head"><span class="title">常用</span><span class="count">6</span></div>
+    <div class="grid">
+      <a class="card enter" style="animation-delay:.02s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-git"/></svg><span class="name">GitHub</span><span class="desc">代码与协作</span><span class="stat"><span class="dot"></span>在线 · 42ms</span></a>
+      <a class="card enter" style="animation-delay:.05s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-cloud"/></svg><span class="name">Cloudflare</span><span class="desc">控制台</span><span class="stat"><span class="dot"></span>在线 · 88ms</span></a>
+      <a class="card enter" style="animation-delay:.08s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-mail"/></svg><span class="name">Gmail</span><span class="desc">邮箱</span><span class="stat"><span class="dot"></span>在线 · 121ms</span></a>
+      <a class="card enter" style="animation-delay:.11s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-tv"/></svg><span class="name">哔哩哔哩</span><span class="desc">视频</span><span class="stat"><span class="dot"></span>在线 · 36ms</span></a>
+      <a class="card enter" style="animation-delay:.14s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-play"/></svg><span class="name">YouTube</span><span class="desc">视频</span><span class="stat"><span class="dot"></span>在线 · 156ms</span></a>
+      <a class="card enter" style="animation-delay:.17s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-globe"/></svg><span class="name">少数派</span><span class="desc">阅读</span><span class="stat"><span class="dot warn"></span>慢 · 1.9s</span></a>
+    </div>
+  </section>
+
+  <section data-od-id="nav-selfhost">
+    <div class="group-head"><span class="title">自托管</span><span class="count">6</span></div>
+    <div class="grid">
+      <a class="card enter" style="animation-delay:.06s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-nas"/></svg><span class="name">飞牛 fnOS</span><span class="desc">nas.local</span><span class="stat"><span class="dot"></span>在线</span></a>
+      <a class="card enter" style="animation-delay:.09s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-router"/></svg><span class="name">iStoreOS</span><span class="desc">router.local</span><span class="stat"><span class="dot"></span>在线</span></a>
+      <a class="card enter" style="animation-delay:.12s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-play"/></svg><span class="name">Jellyfin</span><span class="desc">媒体库</span><span class="stat"><span class="dot"></span>在线</span></a>
+      <a class="card enter" style="animation-delay:.15s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-down"/></svg><span class="name">qBittorrent</span><span class="desc">下载</span><span class="stat"><span class="dot"></span>在线</span></a>
+      <a class="card enter" style="animation-delay:.18s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-folder"/></svg><span class="name">Alist</span><span class="desc">网盘挂载</span><span class="stat"><span class="dot off"></span>离线 · 2 次探活失败</span></a>
+      <a class="card enter" style="animation-delay:.21s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-key"/></svg><span class="name">Vaultwarden</span><span class="desc">密码库</span><span class="stat"><span class="dot"></span>在线</span></a>
+    </div>
+  </section>
+
+  <section data-od-id="nav-dev">
+    <div class="group-head"><span class="title">开发</span><span class="count">4</span></div>
+    <div class="grid">
+      <a class="card enter" style="animation-delay:.1s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-layers"/></svg><span class="name">Vercel</span><span class="desc">部署</span><span class="stat"><span class="dot"></span>在线</span></a>
+      <a class="card enter" style="animation-delay:.13s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-cloud"/></svg><span class="name">Pages</span><span class="desc">CF Pages 项目</span><span class="stat"><span class="dot"></span>在线</span></a>
+      <a class="card enter" style="animation-delay:.16s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-box"/></svg><span class="name">Docker Hub</span><span class="desc">镜像仓库</span><span class="stat"><span class="dot"></span>在线</span></a>
+      <a class="card enter" style="animation-delay:.19s" href="#"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-terminal"/></svg><span class="name">npm</span><span class="desc">包管理</span><span class="stat"><span class="dot"></span>在线</span></a>
+    </div>
+  </section>
+
+  <!-- 设备监控（示例数据） -->
+  <section data-od-id="monitor">
+    <div class="group-head"><span class="title">设备监控</span><span class="note">原型中的数值均为示例数据</span></div>
+    <div class="devgrid">
+      <!-- 路由器 -->
+      <div class="dev enter" data-od-id="dev-router">
+        <div class="dev-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-router"/></svg>
+          <span class="dname">iStoreOS 主路由</span><span class="tag">OpenWrt</span>
+          <span class="up">运行 26 天</span>
+        </div>
+        <div class="rates">
+          <div class="rate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-down"/></svg><span class="val">86.4</span><span class="unit">MB/s</span><span class="lbl">下行</span></div>
+          <div class="rate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-up"/></svg><span class="val">12.6</span><span class="unit">MB/s</span><span class="lbl">上行</span></div>
+        </div>
+        <div class="rings">
+          <div class="ring">
+            <svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="26" fill="none" stroke="var(--border)" stroke-width="5"/><circle cx="30" cy="30" r="26" fill="none" stroke="var(--success)" stroke-width="5" stroke-linecap="round" stroke-dasharray="163.4" stroke-dashoffset="125.8" transform="rotate(-90 30 30)"/></svg>
+            <span><span class="p">23%</span><br><span class="k">CPU</span></span>
+          </div>
+          <div class="ring">
+            <svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="26" fill="none" stroke="var(--border)" stroke-width="5"/><circle cx="30" cy="30" r="26" fill="none" stroke="var(--success)" stroke-width="5" stroke-linecap="round" stroke-dasharray="163.4" stroke-dashoffset="79.9" transform="rotate(-90 30 30)"/></svg>
+            <span><span class="p">51%</span><br><span class="k">内存</span></span>
+          </div>
+          <div class="ring">
+            <svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="26" fill="none" stroke="var(--border)" stroke-width="5"/><circle cx="30" cy="30" r="26" fill="none" stroke="var(--success)" stroke-width="5" stroke-linecap="round" stroke-dasharray="163.4" stroke-dashoffset="89.9" transform="rotate(-90 30 30)"/></svg>
+            <span><span class="p">45%</span><br><span class="k">负载 1.35</span></span>
+          </div>
+        </div>
+        <div class="spark" aria-hidden="true">
+          <svg viewBox="0 0 300 56" preserveAspectRatio="none">
+            <defs><linearGradient id="sg1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".22"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+            <path d="M0 44 L15 42 L30 45 L45 38 L60 40 L75 33 L90 36 L105 29 L120 34 L135 25 L150 30 L165 22 L180 27 L195 19 L210 24 L225 17 L240 22 L255 15 L270 19 L285 13 L300 16 V56 H0 Z" fill="url(#sg1)"/>
+            <path d="M0 44 L15 42 L30 45 L45 38 L60 40 L75 33 L90 36 L105 29 L120 34 L135 25 L150 30 L165 22 L180 27 L195 19 L210 24 L225 17 L240 22 L255 15 L270 19 L285 13 L300 16" fill="none" stroke="var(--accent)" stroke-width="1.6"/>
+          </svg>
+        </div>
+        <div class="dev-foot">
+          <span class="temp">WAN 温度 44°C · 30 分钟下行</span>
+          <button class="trend">查看趋势 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-chev"/></svg></button>
+        </div>
+      </div>
+
+      <!-- NAS（异常：磁盘超阈值） -->
+      <div class="dev alert enter" data-od-id="dev-nas">
+        <div class="dev-head">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><use href="#i-nas"/></svg>
+          <span class="dname">飞牛 NAS</span><span class="tag">fnOS</span>
+          <span class="up">运行 41 天</span>
+        </div>
+        <div class="rates">
+          <div class="rate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-down"/></svg><span class="val">3.2</span><span class="unit">MB/s</span><span class="lbl">eth0 下行</span></div>
+          <div class="rate"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-up"/></svg><span class="val">8.7</span><span class="unit">MB/s</span><span class="lbl">eth0 上行</span></div>
+        </div>
+        <div class="rings">
+          <div class="ring">
+            <svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="26" fill="none" stroke="var(--border)" stroke-width="5"/><circle cx="30" cy="30" r="26" fill="none" stroke="var(--success)" stroke-width="5" stroke-linecap="round" stroke-dasharray="163.4" stroke-dashoffset="103.9" transform="rotate(-90 30 30)"/></svg>
+            <span><span class="p">36%</span><br><span class="k">CPU</span></span>
+          </div>
+          <div class="ring">
+            <svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="26" fill="none" stroke="var(--border)" stroke-width="5"/><circle cx="30" cy="30" r="26" fill="none" stroke="var(--success)" stroke-width="5" stroke-linecap="round" stroke-dasharray="163.4" stroke-dashoffset="92.7" transform="rotate(-90 30 30)"/></svg>
+            <span><span class="p">43%</span><br><span class="k">内存</span></span>
+          </div>
+          <div class="ring">
+            <svg viewBox="0 0 60 60"><circle cx="30" cy="30" r="26" fill="none" stroke="var(--border)" stroke-width="5"/><circle cx="30" cy="30" r="26" fill="none" stroke="var(--danger)" stroke-width="5" stroke-linecap="round" stroke-dasharray="163.4" stroke-dashoffset="14.7" transform="rotate(-90 30 30)"/></svg>
+            <span><span class="p">91%</span><br><span class="k">磁盘 /vol1</span></span>
+          </div>
+        </div>
+        <div class="spark" aria-hidden="true">
+          <svg viewBox="0 0 300 56" preserveAspectRatio="none">
+            <path d="M0 50 L20 48 L40 49 L60 45 L80 47 L100 43 L120 46 L140 41 L160 44 L180 39 L200 43 L220 38 L240 41 L260 36 L280 39 L300 35 V56 H0 Z" fill="rgba(230,179,87,.16)"/>
+            <path d="M0 50 L20 48 L40 49 L60 45 L80 47 L100 43 L120 46 L140 41 L160 44 L180 39 L200 43 L220 38 L240 41 L260 36 L280 39 L300 35" fill="none" stroke="var(--warn)" stroke-width="1.6"/>
+          </svg>
+        </div>
+        <div class="dev-foot">
+          <span class="temp">存储卷温度 41°C · 30 分钟上行</span>
+          <button class="trend">查看趋势 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-chev"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer data-od-id="footer">
+    <span class="livedot"></span><span>数据同步于 21:36:07 · 采集器在线</span>
+    <span style="margin-left:auto">AuroraNav</span>
+  </footer>
+</div>
+
+<!-- 趋势弹层 -->
+<div class="overlay" id="overlay" role="dialog" aria-modal="true" aria-label="流量趋势" data-od-id="trend-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <span class="t">iStoreOS 主路由 · WAN 流量趋势</span>
+      <button class="iconbtn close" aria-label="关闭"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="range" role="group" aria-label="时间范围">
+      <button class="chip" aria-pressed="true">24 小时</button>
+      <button class="chip" aria-pressed="false">7 天</button>
+      <button class="chip" aria-pressed="false">30 天</button>
+    </div>
+    <svg class="chart" id="trendChart" viewBox="0 0 700 220" preserveAspectRatio="none" aria-hidden="true"></svg>
+    <div class="legend"><span><i></i>下行</span><span><i class="alt"></i>上行</span></div>
+    <div class="daystats" id="daystats">
+      <div class="d"><div class="k">周一</div><div class="v">12.4 GB</div></div>
+      <div class="d"><div class="k">周二</div><div class="v">8.1 GB</div></div>
+      <div class="d"><div class="k">周三</div><div class="v">15.9 GB</div></div>
+      <div class="d"><div class="k">周四</div><div class="v">10.2 GB</div></div>
+      <div class="d"><div class="k">周五</div><div class="v">6.8 GB</div></div>
+      <div class="d"><div class="k">周六</div><div class="v">18.3 GB</div></div>
+      <div class="d"><div class="k">周日</div><div class="v">9.5 GB</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var d=new Date(),pad=function(n){return n<10?"0"+n:""+n};
+  function tick(){
+    var n=new Date();
+    document.getElementById("clock").innerHTML=pad(n.getHours())+":"+pad(n.getMinutes())+'<span class="sec">'+pad(n.getSeconds())+"</span>";
+  }
+  tick();setInterval(tick,1000);
+  var h=d.getHours();
+  document.getElementById("greet").textContent=h<5?"夜深了":h<11?"早上好":h<13?"中午好":h<18?"下午好":"晚上好";
+  var wd=["日","一","二","三","四","五","六"];
+  document.getElementById("date").textContent=(d.getMonth()+1)+"月"+d.getDate()+"日 周"+wd[d.getDay()];
+  // 搜索引擎切换
+  var chips=document.querySelectorAll(".chips .chip");
+  chips.forEach(function(c){c.addEventListener("click",function(){
+    chips.forEach(function(o){o.setAttribute("aria-pressed","false")});
+    c.setAttribute("aria-pressed","true");
+    document.getElementById("q").focus();
+  })});
+  // 告警条关闭
+  document.querySelector("#alertbar .dismiss").addEventListener("click",function(){
+    document.getElementById("alertbar").classList.remove("show");
+  });
+  // 主题切换
+  var root=document.documentElement;
+  document.getElementById("themeBtn").addEventListener("click",function(){
+    root.setAttribute("data-theme",root.getAttribute("data-theme")==="dark"?"light":"dark");
+  });
+  // 趋势弹层 + 示例趋势曲线
+  var overlay=document.getElementById("overlay");
+  document.querySelectorAll(".trend").forEach(function(b){b.addEventListener("click",function(){
+    overlay.classList.add("show");drawTrend();
+  })});
+  overlay.querySelector(".close").addEventListener("click",function(){overlay.classList.remove("show")});
+  overlay.addEventListener("click",function(e){if(e.target===overlay)overlay.classList.remove("show")});
+  document.addEventListener("keydown",function(e){if(e.key==="Escape")overlay.classList.remove("show")});
+  var ranges=document.querySelectorAll(".range .chip");
+  ranges.forEach(function(c){c.addEventListener("click",function(){
+    ranges.forEach(function(o){o.setAttribute("aria-pressed","false")});
+    c.setAttribute("aria-pressed","true");drawTrend();
+  })});
+  function drawTrend(){
+    var svg=document.getElementById("trendChart");if(!svg)return;
+    var W=700,H=220,mid=H/2,n=48,pts=[];
+    for(var i=0;i<=n;i++){
+      var base=H*0.72-Math.sin(i/6)*H*0.16-Math.sin(i/2.4)*H*0.05-i*H*0.002;
+      pts.push([i/n*W,Math.max(H*0.08,base)]);
+    }
+    var up=pts.map(function(p,i){return[p[0],Math.min(H-6,H-p[1]*0.28-H*0.12)]});
+    var line=function(arr){return arr.map(function(p,i){return(i?"L":"M")+p[0].toFixed(1)+" "+p[1].toFixed(1)}).join(" ")};
+    var area=line(pts)+" L"+W+" "+H+" L0 "+H+" Z";
+    svg.innerHTML='<defs><linearGradient id="tg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--accent)" stop-opacity=".25"/><stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>'
+      +'<path d="'+area+'" fill="url(#tg)"/>'
+      +'<path d="'+line(pts)+'" fill="none" stroke="var(--accent)" stroke-width="1.8"/>'
+      +'<path d="'+line(up)+'" fill="none" stroke="var(--faint)" stroke-width="1.4" stroke-dasharray="3 4"/>'
+      +'<line x1="0" y1="'+(H-0.5)+'" x2="'+W+'" y2="'+(H-0.5)+'" stroke="var(--border)"/>';
+  }
+})();
+</script>
+</body>
+</html>

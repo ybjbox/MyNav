@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.log
+debug-keys/
+worker/entry.bundle.js
+deploy/config.yaml
+deploy/router_ed25519*
+*.exe
+tmp-test/
+
+# TypeScript 增量编译缓存
+frontend/tsconfig.tsbuildinfo

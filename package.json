@@ -1,0 +1,21 @@
+{
+  "name": "navpage",
+  "version": "1.0.0",
+  "description": "美观现代的个人导航页，部署在 **Cloudflare Pages（免费层）**，自带防护；配合一个跑在 NAS 上的**只出不进**的采集器，实现路由器/NAS 的在线状态、系统异常告警、异常高亮、当前流量与历史流量趋势。",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:worker": "esbuild worker/entry.ts --bundle --format=esm --platform=neutral --target=es2022 --outfile=worker/entry.bundle.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "wrangler": "^4.166.0"
+  }
+}
