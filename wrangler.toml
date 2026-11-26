@@ -1,4 +1,4 @@
-name = "mynav"
+name = "nav"
 main = "worker/entry.bundle.js"
 compatibility_date = "2026-11-01"
 
@@ -17,15 +17,15 @@ run_worker_first = ["/api/*", "/", "/index.html", "/assets/*"]
 [triggers]
 crons = ["*/5 * * * *", "40 4 * * *"]
 
-# ---------- 本地开发绑定（nav-db / nav-kv） ----------
+# ---------- D1 / KV 绑定（线上资源 ID；wrangler dev 会自动在本地 .wrangler/state 模拟） ----------
 [[d1_databases]]
 binding = "DB"
 database_name = "nav-db"
-database_id = "local-nav-db"
+database_id = "44d13cf8-6e5a-4705-b72d-5530708adf0c"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "local-nav-kv"
+id = "42e3f7f630c049f29a633f08f0d14e73"
 
 # Cloudflare Workers AI（免费层每日 10,000 Neurons，用于分析路由器与 OpenClash 日志）
 [ai]
