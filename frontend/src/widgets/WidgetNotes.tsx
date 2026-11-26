@@ -54,10 +54,10 @@ export function WidgetNotes(_props: WidgetProps) {
           gap: 8,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, gap: 6 }}>
+        <div className="notes-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, gap: 6 }}>
           <span style={{ fontWeight: 600, color: "#334155" }}>随手便签</span>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 11, color: "#94a3b8" }}>{savedAt || "本机存储"}</span>
+            <span className="notes-saved" style={{ fontSize: 11, color: "#94a3b8" }}>{savedAt || "本机存储"}</span>
             <button
               type="button"
               className="notes-expand-btn"

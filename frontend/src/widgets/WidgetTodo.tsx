@@ -260,7 +260,7 @@ export function WidgetTodo(_props: WidgetProps) {
       }}
     >
       {syncMode !== "local" && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, fontSize: 11.5 }}>
+        <div className="todo-syncbar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, fontSize: 11.5 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
             <span
               style={{
@@ -352,6 +352,7 @@ export function WidgetTodo(_props: WidgetProps) {
           }}
         />
         <button
+          className="todo-addbtn"
           onClick={() => void add()}
           disabled={!text.trim() || msBusy}
           aria-label="添加"

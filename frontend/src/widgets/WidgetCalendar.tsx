@@ -57,7 +57,7 @@ export function WidgetCalendar(_props: WidgetProps) {
         userSelect: "none",
       }}
     >
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
+      <div className="wc-left" style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }}>
         <div
           className="wc-day"
           style={{
@@ -71,6 +71,7 @@ export function WidgetCalendar(_props: WidgetProps) {
           {day}
         </div>
         <div
+          className="wc-week"
           style={{
             marginTop: 4,
             fontSize: 11.5,
@@ -82,7 +83,7 @@ export function WidgetCalendar(_props: WidgetProps) {
         </div>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
+      <div className="wc-meta" style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0 }}>
         <div
           className="wc-ym"
           style={{

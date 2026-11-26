@@ -34,6 +34,7 @@ export function WidgetFrequent(_props: WidgetProps) {
 
   return (
     <div
+      className="widget-frequent"
       style={{
         height: "100%",
         padding: "16px 18px",
@@ -45,12 +46,12 @@ export function WidgetFrequent(_props: WidgetProps) {
         gap: 10,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+      <div className="wf-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13.5, fontWeight: 600, color: "#0f172a" }}>
           <IconFlame size={15} />
           常用图标
         </span>
-        <span style={{ fontSize: 11, color: "#64748b" }}>
+        <span className="wf-sub" style={{ fontSize: 11, color: "#64748b" }}>
           {items.fallback ? "推荐 · 按点击自动更新" : "按本机点击统计"}
         </span>
       </div>
@@ -61,6 +62,7 @@ export function WidgetFrequent(_props: WidgetProps) {
         </div>
       ) : (
         <div
+          className="wf-grid"
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fill, minmax(54px, 1fr))",

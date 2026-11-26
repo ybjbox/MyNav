@@ -65,8 +65,8 @@ export function WidgetPomodoro(_props: WidgetProps) {
         gap: 8,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ display: "flex", gap: 4 }}>
+      <div className="wpm-head" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div className="wpm-modes" style={{ display: "flex", gap: 4 }}>
           {(["focus", "break"] as const).map((m) => {
             const active = mode === m;
             return (
@@ -92,7 +92,7 @@ export function WidgetPomodoro(_props: WidgetProps) {
           })}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <div className="wpm-ctrl" style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <button
             type="button"
             onClick={() => setRunning((r) => !r)}
