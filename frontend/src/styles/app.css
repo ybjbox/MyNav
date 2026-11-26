@@ -910,8 +910,8 @@ html[data-theme="light"]:not(.has-wallpaper) .card .name { color: var(--fg); tex
   content: ""; position: absolute; inset: 0; border-radius: inherit; opacity: 0;
   box-shadow: inset 0 0 0 1px var(--warn), inset 0 0 22px var(--warn-dim); pointer-events: none;
 }
-.dev.alert::before { opacity: 1; animation: pulse 2.8s var(--ease) infinite; }
-.dev.crit::before { box-shadow: inset 0 0 0 1px var(--danger), inset 0 0 22px var(--danger-dim); }
+.dev.alert::before { opacity: 0; }
+.dev.crit::before { box-shadow: none; }
 .dev-head { display: flex; align-items: center; gap: 10px; }
 .dev-head .devico {
   width: 30px; height: 30px; border-radius: 9px; flex: none;

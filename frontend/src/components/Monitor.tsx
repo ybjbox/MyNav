@@ -15,7 +15,7 @@ function barColor(pct: number, threshold: number, dangerAt?: number): string {
 function DeviceCard({
   dev,
   thresholds,
-  activeAlerts,
+  activeAlerts: _activeAlerts,
   onTrend,
 }: {
   dev: DeviceSample;
@@ -27,9 +27,6 @@ function DeviceCard({
   const isService = dev.kind === "service";
   const disks = dev.disks || [];
   const worstDisk = disks.length ? Math.max(...disks.map((d) => d.used_pct)) : undefined;
-  const devAlerts = activeAlerts.filter((a) => a.device === dev.id || a.device === dev.name);
-  const hasWarn = devAlerts.length > 0;
-  const hasCrit = devAlerts.some((a) => a.severity === "critical");
 
   const kpis: { k: string; v: string; unit?: string; pct?: number; color?: string }[] = [];
   if (!isService && dev.cpu !== undefined) kpis.push({ k: "CPU", v: String(Math.round(dev.cpu)), unit: "%", pct: dev.cpu, color: barColor(dev.cpu, thresholds.cpu) });
@@ -46,14 +43,10 @@ function DeviceCard({
 
   return (
     <div
-      className={`dev enter${offline ? " offline" : ""}${hasWarn && !hasCrit ? " alert" : ""}${hasCrit ? " crit" : ""}`}
+      className={`dev enter${offline ? " offline" : ""}`}
       style={{
         background: "rgba(248, 250, 252, 0.92)",
-        border: hasCrit
-          ? "1px solid rgba(239, 68, 68, 0.5)"
-          : hasWarn
-            ? "1px solid rgba(245, 158, 11, 0.45)"
-            : "1px solid rgba(15, 23, 42, 0.08)",
+        border: "1px solid rgba(15, 23, 42, 0.06)",
         borderRadius: 14,
         padding: "12px 14px",
         color: "#0f172a",
