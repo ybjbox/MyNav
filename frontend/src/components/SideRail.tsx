@@ -2,7 +2,7 @@
  * 点击分类直接切换当前视图（主页 / 分组），底部为告警与设置。 */
 import {
   IconBell, IconBox, IconFolder, IconGlobe, IconHome, IconLayers,
-  IconPlus, IconServer, IconSliders, IconSparkles,
+  IconPlus, IconServer, IconSliders,
 } from "./icons";
 import type { Group } from "../types";
 
@@ -25,7 +25,6 @@ export function SideRail(props: {
   admin: boolean;
   activeAlerts?: number;
   onAlerts?: () => void;
-  onAiDiagnose?: () => void;
   onSettings: () => void;
   onAdd: () => void;
 }) {
@@ -62,17 +61,6 @@ export function SideRail(props: {
           <button className="railitem" title="添加分组" aria-label="添加分组" onClick={props.onAdd}>
             <IconPlus size={18} />
             <span className="rail-label">添加</span>
-          </button>
-        )}
-
-        {props.authed && props.onAiDiagnose && (
-          <button
-            className="railitem"
-            title="AI 日志诊断"
-            aria-label="AI 日志诊断"
-            onClick={props.onAiDiagnose}
-          >
-            <IconSparkles size={17} />
           </button>
         )}
 

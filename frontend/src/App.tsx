@@ -571,7 +571,6 @@ function AppInner() {
           admin={admin && !!draft}
           activeAlerts={activeAlerts.length}
           onAlerts={() => setAlertsOpen(true)}
-          onAiDiagnose={() => setAiOpen(true)}
           onSettings={() => setSettingsTab("appearance")}
           onAdd={addGroup}
         />

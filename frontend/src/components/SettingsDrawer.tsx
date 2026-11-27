@@ -19,6 +19,7 @@ import {
   IconBox,
   IconActivity,
   IconShield,
+  IconSparkles,
 } from "./icons";
 import { wallpapers } from "../lib/wallpapers";
 import { cloneConfig, newId } from "../lib/defaultConfig";
@@ -29,7 +30,7 @@ import { WidgetStoreModal } from "../widgets/WidgetStoreModal";
 import { IconLibraryModal } from "./IconLibraryModal";
 import type { NavConfig, SearchEngine, WidgetInstance, WidgetSize, WidgetType } from "../types";
 
-export type SettingsTab = "appearance" | "search" | "widgets" | "icons" | "monitor" | "data" | "account";
+export type SettingsTab = "appearance" | "search" | "widgets" | "icons" | "monitor" | "ai" | "data" | "account";
 
 const PRESET_ENGINES: SearchEngine[] = [
   { id: "google", name: "Google", url: "https://www.google.com/search?q=%s" },
@@ -65,6 +66,7 @@ const NAV_ITEMS: { id: SettingsTab; label: string; icon: typeof IconSun; authOnl
   { id: "widgets", label: "组件库", icon: IconLayers },
   { id: "icons", label: "图标库", icon: IconBox },
   { id: "monitor", label: "设备监控", icon: IconActivity },
+  { id: "ai", label: "AI 诊断", icon: IconSparkles, authOnly: true },
   { id: "data", label: "数据管理", icon: IconDownload },
   { id: "account", label: "账户安全", icon: IconShield },
 ];
@@ -162,6 +164,7 @@ export function SettingsDrawer(props: {
   const [aiModelsSrc, setAiModelsSrc] = useState<"online" | "builtin" | null>(null);
   const [aiModelsBusy, setAiModelsBusy] = useState(false);
   const [aiUsage, setAiUsage] = useState<AiUsageInfo | null>(null);
+  const [aiUsageBusy, setAiUsageBusy] = useState(false);
 
   const [newEngineName, setNewEngineName] = useState("");
   const [newEngineUrl, setNewEngineUrl] = useState("");
@@ -203,16 +206,18 @@ export function SettingsDrawer(props: {
   }, [props.open, authed, tab]);
 
   useEffect(() => {
-    if (!props.open || !authed || tab !== "monitor" || aiModels.length > 0) return;
+    if (!props.open || !authed || tab !== "ai") return;
     let cancelled = false;
-    api.aiModels()
-      .then((r) => {
-        if (!cancelled) {
-          setAiModels(r.models || []);
-          setAiModelsSrc(r.source);
-        }
-      })
-      .catch(() => {});
+    if (aiModels.length === 0) {
+      api.aiModels()
+        .then((r) => {
+          if (!cancelled) {
+            setAiModels(r.models || []);
+            setAiModelsSrc(r.source);
+          }
+        })
+        .catch(() => {});
+    }
     api.aiUsage(false)
       .then((u) => {
         if (!cancelled) setAiUsage(u);
@@ -846,63 +851,232 @@ export function SettingsDrawer(props: {
                     )}
                   </div>
 
-                  <div className="settings-card">
-                    <div className="settings-block" style={{ padding: "14px 18px", borderBottom: "1px solid rgba(16,26,36,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>AI 日志诊断模型</div>
-                        <div className="formhint" style={{ marginTop: 2 }}>
-                          {aiModelsSrc === "online"
-                            ? "已在线同步 Cloudflare Workers AI 文本推理模型列表"
-                            : "使用内置精选模型列表（配置 CF_ACCOUNT_ID / CF_API_TOKEN 后可在线拉取全量目录）"}
-                        </div>
-                      </div>
-                      <Button
-                        size="small"
-                        loading={aiModelsBusy}
-                        onClick={async () => {
-                          setAiModelsBusy(true);
-                          try {
-                            const r = await api.aiModels(true);
-                            setAiModels(r.models || []);
-                            setAiModelsSrc(r.source);
-                            toast(r.source === "online" ? `已在线获取 ${r.models.length} 个可用模型` : "已刷新内置模型列表");
-                          } catch (e) {
-                            toast(`获取失败：${(e as Error).message}`, true);
-                          } finally {
-                            setAiModelsBusy(false);
-                          }
-                        }}
-                      >
-                        在线刷新模型
-                      </Button>
-                    </div>
-                    <div className="settings-row">
-                      <label>默认诊断模型</label>
-                      <Select
-                        showSearch
-                        optionFilterProp="label"
-                        value={resolveActiveModelId(draft.monitor.aiModel)}
-                        style={{ minWidth: 260, maxWidth: 360 }}
-                        options={(aiModels.length > 0 ? aiModels : AI_FALLBACK_MODELS).map(formatAiModelOption)}
-                        onChange={(v) => setDraft((d) => ({ ...d, monitor: { ...d.monitor, aiModel: v } }))}
-                      />
-                    </div>
-                    {aiUsage?.available && typeof aiUsage.todayNeurons === "number" && (
-                      <div className="settings-row">
-                        <label>今日 AI 额度</label>
-                        <span style={{ fontSize: 12.5, color: "#475569" }}>
-                          已用 <strong>{aiUsage.todayNeurons}</strong> / {aiUsage.dailyFreeLimit || 10000} Neurons
-                          （今日 {aiUsage.requests || 0} 次 · 基准 1x = $0.40/M 输出）
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
                   <div className="formfoot">
                     <Button onClick={() => setDraft(cloneConfig(config))}>还原</Button>
                     <Button type="primary" onClick={doSave}>保存设置</Button>
                   </div>
                 </>
+              )}
+
+              {tab === "ai" && (
+                (() => {
+                  const catalog = aiModels.length > 0 ? aiModels : AI_FALLBACK_MODELS;
+                  const activeId = resolveActiveModelId(draft.monitor.aiModel);
+                  const selectedModel = catalog.find((m) => m.id === activeId);
+                  const limit = aiUsage?.dailyFreeLimit || 10000;
+                  const used = aiUsage?.todayNeurons ?? 0;
+                  const pct = Math.min(100, Math.round((used / limit) * 1000) / 10);
+                  const barColor = pct >= 85 ? "#ef4444" : pct >= 60 ? "#f59e0b" : "#10b981";
+                  const compareList = catalog.filter((m) => !m.paidOnly && typeof m.outputUsdPerM === "number").slice(0, 8);
+                  const fmtCtx = (cw?: number) =>
+                    !cw ? "—" : cw >= 1_000_000 ? `${Math.round(cw / 1024 / 1024)}M` : `${Math.round(cw / 1024)}K`;
+
+                  return (
+                    <>
+                      <div className="settings-card">
+                        <div className="settings-block" style={{ padding: "14px 18px", borderBottom: "1px solid rgba(16,26,36,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>今日 Workers AI 额度（UTC）</div>
+                            <div className="formhint" style={{ marginTop: 2 }}>
+                              {aiUsage?.available
+                                ? `统计日期 UTC ${aiUsage.dateUtc} · 免费额度每日 ${limit.toLocaleString()} Neurons`
+                                : aiUsage?.reason
+                                  ? `暂无法读取账号用量：${aiUsage.reason}`
+                                  : "正在读取 Cloudflare Workers AI 今日用量…"}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <Button
+                              size="small"
+                              loading={aiUsageBusy}
+                              onClick={async () => {
+                                setAiUsageBusy(true);
+                                try {
+                                  const u = await api.aiUsage(true);
+                                  setAiUsage(u);
+                                } catch (e) {
+                                  toast(`刷新额度失败：${(e as Error).message}`, true);
+                                } finally {
+                                  setAiUsageBusy(false);
+                                }
+                              }}
+                            >
+                              刷新额度
+                            </Button>
+                            <Button
+                              size="small"
+                              type="primary"
+                              onClick={() => {
+                                props.onClose();
+                                window.dispatchEvent(new CustomEvent("nav:open-ai"));
+                              }}
+                            >
+                              打开 AI 诊断
+                            </Button>
+                          </div>
+                        </div>
+
+                        {aiUsage?.available && (
+                          <div className="settings-block" style={{ padding: "14px 18px", gap: 10 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 13 }}>
+                              <span>
+                                已用 <strong style={{ color: "#0f172a", fontSize: 15 }}>{used}</strong> / {limit.toLocaleString()} Neurons
+                                <span style={{ color: "#64748b", marginLeft: 8 }}>({pct}%)</span>
+                              </span>
+                              <span style={{ color: "#64748b", fontSize: 12 }}>
+                                今日 {aiUsage.requests || 0} 次 · 入 {(aiUsage.inputTokens || 0).toLocaleString()} / 出 {(aiUsage.outputTokens || 0).toLocaleString()} tokens
+                              </span>
+                            </div>
+                            <div style={{ height: 7, borderRadius: 999, background: "rgba(15, 23, 42, 0.08)", overflow: "hidden" }}>
+                              <div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: barColor, transition: "width 0.3s ease" }} />
+                            </div>
+                            {aiUsage.byModel && aiUsage.byModel.length > 0 && (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+                                {aiUsage.byModel.map((row) => (
+                                  <span
+                                    key={row.modelId}
+                                    style={{
+                                      fontSize: 11.5,
+                                      padding: "3px 8px",
+                                      borderRadius: 999,
+                                      background: "rgba(15, 23, 42, 0.04)",
+                                      border: "1px solid rgba(15, 23, 42, 0.07)",
+                                      color: "#334155",
+                                    }}
+                                  >
+                                    {row.modelId.replace(/^@(?:cf|hf)\/[^/]+\//, "")}: {row.neurons} N ({row.requests}次)
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="settings-card">
+                        <div className="settings-block" style={{ padding: "14px 18px", borderBottom: "1px solid rgba(16,26,36,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 14, color: "#1e293b", display: "flex", alignItems: "center", gap: 8 }}>
+                              诊断模型配置
+                              <span
+                                style={{
+                                  fontSize: 11,
+                                  fontWeight: 500,
+                                  padding: "1px 7px",
+                                  borderRadius: 999,
+                                  background: aiModelsSrc === "online" ? "rgba(16, 185, 129, 0.12)" : "rgba(100, 116, 139, 0.12)",
+                                  color: aiModelsSrc === "online" ? "#059669" : "#475569",
+                                }}
+                              >
+                                {aiModelsSrc === "online" ? `在线目录 (${catalog.length})` : "内置精选"}
+                              </span>
+                            </div>
+                            <div className="formhint" style={{ marginTop: 2 }}>
+                              主界面小组件与「一键 AI 诊断」将默认使用这里选定的模型（基准 1.0x = 输出 $0.40/M）
+                            </div>
+                          </div>
+                          <Button
+                            size="small"
+                            loading={aiModelsBusy}
+                            onClick={async () => {
+                              setAiModelsBusy(true);
+                              try {
+                                const r = await api.aiModels(true);
+                                setAiModels(r.models || []);
+                                setAiModelsSrc(r.source);
+                                toast(r.source === "online" ? `已在线获取 ${r.models.length} 个可用模型` : "已刷新内置模型列表");
+                              } catch (e) {
+                                toast(`获取失败：${(e as Error).message}`, true);
+                              } finally {
+                                setAiModelsBusy(false);
+                              }
+                            }}
+                          >
+                            在线刷新模型
+                          </Button>
+                        </div>
+
+                        <div className="settings-row">
+                          <div>
+                            <label>默认诊断模型</label>
+                            <div className="sr-desc">{activeId}</div>
+                          </div>
+                          <Select
+                            showSearch
+                            optionFilterProp="label"
+                            value={activeId}
+                            style={{ minWidth: 260, maxWidth: 380 }}
+                            options={catalog.map(formatAiModelOption)}
+                            onChange={(v) => setDraft((d) => ({ ...d, monitor: { ...d.monitor, aiModel: v } }))}
+                          />
+                        </div>
+
+                        {selectedModel && (
+                          <div className="settings-block" style={{ padding: "12px 18px", borderBottom: compareList.length > 0 ? "1px solid rgba(16,26,36,0.06)" : "none", background: "rgba(248, 250, 252, 0.7)" }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", fontSize: 12, color: "#334155" }}>
+                              <span>上下文：<strong>{fmtCtx(selectedModel.contextWindow)}</strong></span>
+                              {typeof selectedModel.inputUsdPerM === "number" && (
+                                <span>输入：<strong>${selectedModel.inputUsdPerM}/M</strong> ({selectedModel.inputNeuronsPer1K ?? "—"} N/1K)</span>
+                              )}
+                              {typeof selectedModel.outputUsdPerM === "number" && (
+                                <span>输出：<strong>${selectedModel.outputUsdPerM}/M</strong> ({selectedModel.outputNeuronsPer1K ?? "—"} N/1K)</span>
+                              )}
+                              {typeof selectedModel.costMultiplier === "number" && (
+                                <span>消耗倍数：<strong>{selectedModel.costMultiplier}x</strong></span>
+                              )}
+                              <span>{selectedModel.reasoning ? "深度推理（耗时较长）" : "直出响应（快速）"}</span>
+                              <span style={{ color: selectedModel.paidOnly ? "#dc2626" : "#059669", fontWeight: 600 }}>
+                                {selectedModel.paidOnly ? "需 Workers Paid" : "免费额度可用"}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        {compareList.length > 0 && (
+                          <div className="settings-block" style={{ padding: "12px 18px", gap: 8 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "#475569" }}>免费可用模型快速切换与消耗对比</div>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 8 }}>
+                              {compareList.map((m) => {
+                                const on = m.id === activeId;
+                                return (
+                                  <button
+                                    key={m.id}
+                                    type="button"
+                                    onClick={() => setDraft((d) => ({ ...d, monitor: { ...d.monitor, aiModel: m.id } }))}
+                                    style={{
+                                      textAlign: "left",
+                                      padding: "8px 10px",
+                                      borderRadius: 10,
+                                      cursor: "pointer",
+                                      background: on ? "var(--accent-dim)" : "#fff",
+                                      border: on ? "1px solid var(--accent)" : "1px solid rgba(15, 23, 42, 0.09)",
+                                      color: "#0f172a",
+                                    }}
+                                  >
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600 }}>
+                                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
+                                      <span style={{ fontSize: 11, color: (m.costMultiplier || 1) <= 1.5 ? "#059669" : "#d97706", flexShrink: 0 }}>
+                                        {m.costMultiplier}x
+                                      </span>
+                                    </div>
+                                    <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                                      {fmtCtx(m.contextWindow)} · 出 ${m.outputUsdPerM}/M · {m.reasoning ? "推理" : "快速"}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="formfoot">
+                        <Button onClick={() => setDraft(cloneConfig(config))}>还原</Button>
+                        <Button type="primary" onClick={doSave}>保存设置</Button>
+                      </div>
+                    </>
+                  );
+                })()
               )}
 
               {tab === "data" && (
