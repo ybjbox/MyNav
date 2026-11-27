@@ -1357,6 +1357,14 @@ body.admin .editfloat { opacity: 0.75; transition: opacity var(--speed-1) var(--
   .widget-monitor .dev-head { gap: 4px !important; margin-bottom: 4px !important; }
   .widget-monitor .devico { width: 22px !important; height: 22px !important; }
   .widget-monitor .dev-head .tag { display: none !important; }
+
+  /* AI 诊断 1×1：保留标题与一键诊断按钮 */
+  .widget-ai { padding: 8px 9px !important; gap: 6px !important; }
+  .widget-ai .wai-title { font-size: 11.5px !important; }
+  .widget-ai .wai-expand,
+  .widget-ai .wai-meta,
+  .widget-ai .wai-hint { display: none !important; }
+  .widget-ai .wai-actions button { padding: 6px 8px !important; font-size: 11px !important; }
 }
 @container wcard (max-height: 125px) and (min-width: 176px) {
   .widget-weather { padding: 10px 14px; }

@@ -9,9 +9,10 @@ import type { WidgetInstance, WidgetSize, WidgetType } from "../types";
 const CATEGORIES: ("全部" | WidgetCategory)[] = ["全部", "效率", "资讯", "系统"];
 const SIZES: WidgetSize[] = ["1x1", "2x1", "2x2", "4x2"];
 
-function MonitorDemoPreview({ kind }: { kind?: "router" | "nas" }) {
+function MonitorDemoPreview({ kind }: { kind?: "router" | "nas" | "service" }) {
   const showRouter = !kind || kind === "router";
   const showNas = !kind || kind === "nas";
+  const showService = kind === "service";
   return (
     <div
       style={{
@@ -51,6 +52,18 @@ function MonitorDemoPreview({ kind }: { kind?: "router" | "nas" }) {
           </div>
         </div>
       )}
+      {showService && (
+        <div style={{ background: "#f8fafc", borderRadius: 12, padding: "10px 12px", border: "1px solid rgba(15,23,42,0.08)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+            <IconRouter size={13} /> OpenClash 代理
+            <span style={{ marginLeft: "auto", color: "#10b981", fontSize: 10 }}>在线</span>
+          </div>
+          <div style={{ fontSize: 11, color: "#64748b" }}>Rule 模式 · 延迟 42ms</div>
+          <div style={{ height: 4, borderRadius: 999, background: "rgba(15,23,42,0.08)", marginTop: 6, overflow: "hidden" }}>
+            <div style={{ width: "36%", height: "100%", background: "#10b981" }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -78,8 +91,8 @@ function WidgetPreviewBox({ m, authed }: { m: WidgetManifest; authed: boolean })
         }}
       >
         <div style={{ width: "100%", height: "100%", borderRadius: 18, overflow: "hidden", boxShadow: "0 6px 18px rgba(0,0,0,0.12)" }}>
-          {(m.type === "monitor" || m.type === "monitor-router" || m.type === "monitor-nas") && !authed ? (
-            <MonitorDemoPreview kind={m.type === "monitor-router" ? "router" : m.type === "monitor-nas" ? "nas" : undefined} />
+          {(m.type === "monitor" || m.type === "monitor-router" || m.type === "monitor-nas" || m.type === "monitor-openclash") && !authed ? (
+            <MonitorDemoPreview kind={m.type === "monitor-router" ? "router" : m.type === "monitor-nas" ? "nas" : m.type === "monitor-openclash" ? "service" : undefined} />
           ) : (
             <Comp admin={false} inst={fakeInst} />
           )}

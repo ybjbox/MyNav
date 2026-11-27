@@ -102,6 +102,8 @@ export const defaultConfig: NavConfig = {
     { id: "w-frequent", type: "frequent", span: 1, size: "2x1" },
     { id: "w-monitor-router", type: "monitor-router", span: 1, size: "2x2" },
     { id: "w-monitor-nas", type: "monitor-nas", span: 1, size: "2x2" },
+    { id: "w-monitor-openclash", type: "monitor-openclash", span: 1, size: "2x2" },
+    { id: "w-ai-diagnose", type: "ai-diagnose", span: 1, size: "2x2" },
   ],
 };
 

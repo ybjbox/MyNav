@@ -62,6 +62,12 @@ function AppInner() {
     }
   }, [authed, setAdmin]);
 
+  React.useEffect(() => {
+    const onOpenAi = () => setAiOpen(true);
+    window.addEventListener("nav:open-ai", onOpenAi);
+    return () => window.removeEventListener("nav:open-ai", onOpenAi);
+  }, []);
+
   /* 管理模式草稿（进入管理模式时从当前配置复制） */
   const [draft, setDraft] = useState<NavConfig | null>(null);
   React.useEffect(() => {

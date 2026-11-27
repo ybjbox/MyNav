@@ -2,8 +2,9 @@
  * 新增 widget 三步：写组件 → 在此注册 → types.ts WidgetType 加成员。 */
 import type { ComponentType } from "react";
 import type { WidgetInstance, WidgetSize, WidgetType } from "../types";
-import { WidgetMonitor, WidgetMonitorNas, WidgetMonitorRouter } from "../components/Monitor";
+import { WidgetMonitor, WidgetMonitorNas, WidgetMonitorOpenClash, WidgetMonitorRouter } from "../components/Monitor";
 import { WeatherWidget } from "../components/WeatherWidget";
+import { WidgetAiDiagnose } from "./WidgetAiDiagnose";
 import { WidgetTodo } from "./WidgetTodo";
 import { WidgetCalendar } from "./WidgetCalendar";
 import { WidgetCountdown } from "./WidgetCountdown";
@@ -121,6 +122,24 @@ export const widgetRegistry: WidgetManifest[] = [
     defaultSpan: 1,
     defaultSize: "2x2",
     Component: WidgetMonitorNas,
+  },
+  {
+    type: "monitor-openclash",
+    name: "OpenClash 监控",
+    desc: "代理内核、节点连通性与状态",
+    category: "系统",
+    defaultSpan: 1,
+    defaultSize: "2x2",
+    Component: WidgetMonitorOpenClash,
+  },
+  {
+    type: "ai-diagnose",
+    name: "AI 日志诊断",
+    desc: "Workers AI 一键排错与日志分析",
+    category: "系统",
+    defaultSpan: 1,
+    defaultSize: "2x2",
+    Component: WidgetAiDiagnose,
   },
 ];
 

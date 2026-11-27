@@ -33,6 +33,8 @@ export type WidgetType =
   | "monitor"
   | "monitor-router"
   | "monitor-nas"
+  | "monitor-openclash"
+  | "ai-diagnose"
   | "todo"
   | "calendar"
   | "countdown"

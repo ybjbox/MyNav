@@ -161,10 +161,10 @@ function DeviceCard({
   );
 }
 
-/** 设备监控 widget 内容（支持按 kind 过滤为独立路由器 / NAS 监控卡片） */
-export function WidgetMonitor(props: { admin: boolean; onTrend?: (deviceId: string) => void; kind?: "router" | "nas" }) {
+/** 设备监控 widget 内容（支持按 kind 过滤为独立路由器 / NAS / OpenClash 监控卡片） */
+export function WidgetMonitor(props: { admin: boolean; onTrend?: (deviceId: string) => void; kind?: "router" | "nas" | "service" }) {
   const { snapshot, config, authed } = useStore();
-  const kindTitle = props.kind === "router" ? "路由器" : props.kind === "nas" ? "NAS" : "设备";
+  const kindTitle = props.kind === "router" ? "路由器" : props.kind === "nas" ? "NAS" : props.kind === "service" ? "OpenClash" : "设备";
 
   const wrapStyle: React.CSSProperties = {
     height: "100%",
@@ -190,7 +190,11 @@ export function WidgetMonitor(props: { admin: boolean; onTrend?: (deviceId: stri
     );
   }
 
-  const devices = props.kind ? snapshot.devices.filter((d) => d.kind === props.kind) : snapshot.devices;
+  const devices = props.kind
+    ? props.kind === "service"
+      ? snapshot.devices.filter((d) => d.kind === "service" || d.id === "openclash")
+      : snapshot.devices.filter((d) => d.kind === props.kind)
+    : snapshot.devices;
 
   if (devices.length === 0) {
     return (
@@ -229,4 +233,8 @@ export function WidgetMonitorRouter(props: { admin: boolean; onTrend?: (deviceId
 
 export function WidgetMonitorNas(props: { admin: boolean; onTrend?: (deviceId: string) => void }) {
   return <WidgetMonitor {...props} kind="nas" />;
+}
+
+export function WidgetMonitorOpenClash(props: { admin: boolean; onTrend?: (deviceId: string) => void }) {
+  return <WidgetMonitor {...props} kind="service" />;
 }
