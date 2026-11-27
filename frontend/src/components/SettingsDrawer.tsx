@@ -147,14 +147,16 @@ export function SettingsDrawer(props: {
   onRemoveWidget?: (id: string) => void;
   onSaved?: (saved: NavConfig) => void;
 }) {
-  const { config, saveConfig, resetConfig, toast, authed, login, logout, setPreviewSite } = useStore();
+  const { config, saveConfig, resetConfig, toast, authed, username, login, logout, updateAccount, setPreviewSite } = useStore();
   const [tab, setTab] = useState<SettingsTab>(props.initialTab || "appearance");
   const [draft, setDraft] = useState<NavConfig>(config);
   const [importText, setImportText] = useState("");
+  const [loginUser, setLoginUser] = useState("");
   const [loginPw, setLoginPw] = useState("");
   const [loginErr, setLoginErr] = useState("");
   const [loginBusy, setLoginBusy] = useState(false);
   const [pwOld, setPwOld] = useState("");
+  const [newAccUser, setNewAccUser] = useState("");
   const [pwNew, setPwNew] = useState("");
   const [pwNew2, setPwNew2] = useState("");
   const [msStatus, setMsStatus] = useState<{ configured: boolean; connected: boolean; listId: string | null; listName: string | null } | null>(null);
@@ -378,12 +380,25 @@ export function SettingsDrawer(props: {
     URL.revokeObjectURL(a.href);
   };
 
-  const doChangePw = async () => {
-    if (pwNew !== pwNew2) { toast("两次输入的新密码不一致", true); return; }
-    if (pwNew.length < 6) { toast("新密码至少 6 位", true); return; }
+  useEffect(() => {
+    if (username && !newAccUser) setNewAccUser(username);
+  }, [username, newAccUser]);
+
+  const doChangeAccount = async () => {
+    const trimmedUser = newAccUser.trim();
+    const userChanged = !!trimmedUser && trimmedUser !== (username || "");
+    if (!pwOld) { toast("请输入当前密码", true); return; }
+    if (!userChanged && !pwNew) { toast("请填写新账号或新密码", true); return; }
+    if (pwNew && pwNew !== pwNew2) { toast("两次输入的新密码不一致", true); return; }
+    if (pwNew && pwNew.length < 6) { toast("新密码至少 6 位", true); return; }
     try {
-      await api.changePassword(pwOld, pwNew);
-      toast("密码已修改");
+      const nextName = await updateAccount({
+        currentPassword: pwOld,
+        ...(userChanged ? { newUsername: trimmedUser } : {}),
+        ...(pwNew ? { newPassword: pwNew } : {}),
+      });
+      setNewAccUser(nextName);
+      toast("账号凭据已更新");
       setPwOld(""); setPwNew(""); setPwNew2("");
     } catch (e) {
       toast(`修改失败：${(e as Error).message}`, true);
@@ -1153,22 +1168,23 @@ export function SettingsDrawer(props: {
                   className="settings-card"
                   onSubmit={async (e) => {
                     e.preventDefault();
-                    if (!loginPw) return;
+                    if (!loginUser.trim() || !loginPw) return;
                     setLoginBusy(true);
                     setLoginErr("");
                     try {
-                      await login(loginPw);
+                      await login(loginUser.trim(), loginPw);
+                      setLoginUser("");
                       setLoginPw("");
                       toast("已登录");
                     } catch (ex) {
-                      setLoginErr((ex as Error).message === "密码错误" ? "密码错误" : `登录失败：${(ex as Error).message}`);
+                      setLoginErr((ex as Error).message || "登录失败");
                     } finally {
                       setLoginBusy(false);
                     }
                   }}
                 >
                   <div className="settings-block" style={{ padding: "12px 18px", borderBottom: "1px solid rgba(16,26,36,0.06)" }}>
-                    <div className="formhint">登录后可编辑导航、调整桌面组件与查看设备监控及告警</div>
+                    <div className="formhint">使用账号与密码登录后，可编辑导航、调整桌面组件与查看设备监控及告警</div>
                   </div>
                   {loginErr && (
                     <div className="settings-block" style={{ padding: "10px 18px 0" }}>
@@ -1176,11 +1192,22 @@ export function SettingsDrawer(props: {
                     </div>
                   )}
                   <div className="settings-row">
-                    <label htmlFor="settings-lg-pw">管理密码</label>
+                    <label htmlFor="settings-lg-user">账号</label>
+                    <Input
+                      id="settings-lg-user"
+                      autoComplete="username"
+                      placeholder="请输入登录账号"
+                      value={loginUser}
+                      onChange={(e) => setLoginUser(e.target.value)}
+                      style={{ maxWidth: 240 }}
+                    />
+                  </div>
+                  <div className="settings-row">
+                    <label htmlFor="settings-lg-pw">密码</label>
                     <Input.Password
                       id="settings-lg-pw"
                       autoComplete="current-password"
-                      placeholder="请输入管理密码"
+                      placeholder="请输入登录密码"
                       value={loginPw}
                       onChange={(e) => setLoginPw(e.target.value)}
                       style={{ maxWidth: 240 }}
@@ -1188,7 +1215,7 @@ export function SettingsDrawer(props: {
                   </div>
                   <div className="settings-block" style={{ padding: "14px 18px" }}>
                     <div className="formfoot" style={{ margin: 0 }}>
-                      <Button type="primary" htmlType="submit" loading={loginBusy} disabled={!loginPw}>登录</Button>
+                      <Button type="primary" htmlType="submit" loading={loginBusy} disabled={!loginUser.trim() || !loginPw}>登录</Button>
                     </div>
                   </div>
                 </form>
@@ -1277,7 +1304,9 @@ export function SettingsDrawer(props: {
 
                   <div className="settings-card">
                     <div className="settings-block" style={{ padding: "12px 18px", borderBottom: "1px solid rgba(16,26,36,0.06)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                      <div className="formhint" style={{ margin: 0 }}>修改管理密码（collector 推送令牌在 Cloudflare 环境变量中管理）</div>
+                      <div className="formhint" style={{ margin: 0 }}>
+                        当前账号：<strong style={{ color: "#0f172a" }}>{username || "admin"}</strong>（采集器亦使用账号密码登录换取短期令牌）
+                      </div>
                       <Button
                         size="small"
                         danger
@@ -1291,22 +1320,32 @@ export function SettingsDrawer(props: {
                     </div>
                     <div className="settings-row">
                       <label>当前密码</label>
-                      <Input.Password value={pwOld} onChange={(e) => setPwOld(e.target.value)} style={{ maxWidth: 240 }} />
+                      <Input.Password value={pwOld} onChange={(e) => setPwOld(e.target.value)} placeholder="验证当前密码" style={{ maxWidth: 240 }} />
                     </div>
                     <div className="settings-row">
-                      <label>新密码（≥6 位）</label>
-                      <Input.Password value={pwNew} onChange={(e) => setPwNew(e.target.value)} style={{ maxWidth: 240 }} />
+                      <label>账号名称</label>
+                      <Input value={newAccUser} onChange={(e) => setNewAccUser(e.target.value)} placeholder="2-32 位字母数字或 ._-" style={{ maxWidth: 240 }} />
+                    </div>
+                    <div className="settings-row">
+                      <label>新密码（可选，≥6 位）</label>
+                      <Input.Password value={pwNew} onChange={(e) => setPwNew(e.target.value)} placeholder="不改密码请留空" style={{ maxWidth: 240 }} />
                     </div>
                     <div className="settings-row">
                       <label>确认新密码</label>
-                      <Input.Password value={pwNew2} onChange={(e) => setPwNew2(e.target.value)} style={{ maxWidth: 240 }} />
+                      <Input.Password value={pwNew2} onChange={(e) => setPwNew2(e.target.value)} placeholder="再次输入新密码" style={{ maxWidth: 240 }} />
                     </div>
                     <div className="settings-block" style={{ padding: "14px 18px" }}>
                       <div className="formfoot" style={{ margin: 0 }}>
-                        <Button type="primary" disabled={!pwOld || !pwNew} onClick={doChangePw}>修改密码</Button>
+                        <Button
+                          type="primary"
+                          disabled={!pwOld || (!pwNew && (!newAccUser.trim() || newAccUser.trim() === (username || "")))}
+                          onClick={doChangeAccount}
+                        >
+                          保存账号设置
+                        </Button>
                       </div>
                       <div className="formhint" style={{ marginTop: 10 }}>
-                        密码以 PBKDF2 哈希存于 Cloudflare 环境变量；登录接口受 WAF 限速保护。
+                        修改后旧网页会话与采集器旧令牌会自动失效；若路由器采集器使用同一账号密码，请在 LuCI 同步更新后重启采集器。
                       </div>
                     </div>
                   </div>

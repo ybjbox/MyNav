@@ -1,5 +1,18 @@
 /* API 处理器集合（由 Pages Functions 迁移为单入口 Worker） */
-import { Env, err, json, hashPassword, rateLimited, requireAdmin, requireToken, signSession, verifyPassword } from "./_shared";
+import {
+  Env,
+  USERNAME_RE,
+  ensureUsersTable,
+  err,
+  hashPassword,
+  json,
+  rateLimited,
+  requireAdmin,
+  requireCollector,
+  signCollectorToken,
+  signSession,
+  verifyAccountCredentials,
+} from "./_shared";
 import { saveIngestedLogs } from "./ai";
 
 /* ---------- /api/login ---------- */
@@ -16,21 +29,47 @@ export async function login(req: Request, env: Env): Promise<Response> {
   if (await rateLimited(env, req, "rl:login", 8)) {
     return err(429, "尝试过于频繁，请 15 分钟后再试");
   }
+  let username = "";
   let password = "";
   try {
-    const body = (await requestJson(req)) as { password?: string };
+    const body = (await requestJson(req)) as { username?: string; password?: string };
+    username = String(body.username || "").trim();
     password = String(body.password || "");
   } catch {
     return err(400, "请求格式错误");
   }
-  if (!password) return err(400, "缺少密码");
-  const ok = await verifyPassword(env, password);
-  if (!ok) return err(401, "密码错误");
-  const token = await signSession(env);
+  if (!username || !password) return err(400, "请输入账号和密码");
+  const auth = await verifyAccountCredentials(env, username, password);
+  if (auth.uninitialized) return err(503, "尚未初始化账号凭据（请配置 USERNAME / PASSWORD 或 D1 users 表）");
+  if (!auth.ok || !auth.user) return err(401, "账号或密码错误");
+  const token = await signSession(env, auth.user);
   const sec = isHttpsReq(req) ? " Secure;" : "";
-  return json({ ok: true }, 200, {
+  return json({ ok: true, username: auth.user.username, role: auth.user.role }, 200, {
     "set-cookie": `${COOKIE}=${token}; HttpOnly;${sec} Path=/; SameSite=Lax; Max-Age=${7 * 86400}`,
   });
+}
+
+/* ---------- /api/collector/login（采集器账号密码换取 Bearer JWT） ---------- */
+export async function collectorLogin(req: Request, env: Env): Promise<Response> {
+  if (await rateLimited(env, req, "rl:clogin", 20)) {
+    return err(429, "尝试过于频繁，请稍后再试");
+  }
+  let username = "";
+  let password = "";
+  try {
+    const body = (await requestJson(req)) as { username?: string; password?: string };
+    username = String(body.username || "").trim();
+    password = String(body.password || "");
+  } catch {
+    return err(400, "请求格式错误");
+  }
+  if (!username || !password) return err(400, "请输入采集器账号和密码");
+  const auth = await verifyAccountCredentials(env, username, password);
+  if (auth.uninitialized) return err(503, "云端尚未初始化账号凭据");
+  if (!auth.ok || !auth.user) return err(401, "账号或密码错误");
+  const ttlHours = 24;
+  const token = await signCollectorToken(env, auth.user, ttlHours);
+  return json({ ok: true, token, expires_in: ttlHours * 3600, username: auth.user.username });
 }
 
 /* ---------- /api/logout ---------- */
@@ -43,7 +82,7 @@ export async function logout(req?: Request): Promise<Response> {
 
 /* ---------- /api/session ---------- */
 export async function session(req: Request, env: Env): Promise<Response> {
-  const { authed } = await requireAdmin(req, env);
+  const { authed, username, role } = await requireAdmin(req, env);
   let collectorConfigured = false;
   try {
     const row = await env.DB.prepare("SELECT MAX(updated_at) AS latest FROM latest").first<{ latest: number | null }>();
@@ -51,28 +90,64 @@ export async function session(req: Request, env: Env): Promise<Response> {
   } catch {
     collectorConfigured = false;
   }
-  return json({ authenticated: authed, collectorConfigured });
+  return json({ authenticated: authed, username: username || null, role: role || null, collectorConfigured });
 }
 
-/* ---------- /api/password ---------- */
-export async function password(req: Request, env: Env): Promise<Response> {
-  const { authed } = await requireAdmin(req, env);
-  if (!authed) return err(401, "未登录");
+/* ---------- /api/account（修改当前账号名或密码，并轮换 token_version） ---------- */
+export async function updateAccount(req: Request, env: Env): Promise<Response> {
+  const { authed, username } = await requireAdmin(req, env);
+  if (!authed || !username) return err(401, "未登录");
   if (await rateLimited(env, req, "rl:pw", 5)) return err(429, "操作过于频繁");
 
-  let oldPassword = "", newPassword = "";
+  let currentPassword = "";
+  let newUsername = "";
+  let newPassword = "";
   try {
-    const body = (await requestJson(req)) as { oldPassword?: string; newPassword?: string };
-    oldPassword = String(body.oldPassword || "");
+    const body = (await requestJson(req)) as { currentPassword?: string; newUsername?: string; newPassword?: string };
+    currentPassword = String(body.currentPassword || "");
+    newUsername = String(body.newUsername || "").trim();
     newPassword = String(body.newPassword || "");
   } catch {
     return err(400, "请求格式错误");
   }
-  if (newPassword.length < 6) return err(400, "新密码至少 6 位");
-  if (!(await verifyPassword(env, oldPassword))) return err(401, "当前密码错误");
-  const hash = await hashPassword(newPassword);
-  await env.KV.put("admin:password_hash", hash);
-  return json({ ok: true });
+  if (!currentPassword) return err(400, "请输入当前密码");
+  if (!newUsername && !newPassword) return err(400, "请填写需要修改的新账号或新密码");
+  if (newUsername && !USERNAME_RE.test(newUsername)) {
+    return err(400, "账号名需为 2-32 位字母、数字或 . _ -");
+  }
+  if (newPassword && newPassword.length < 6) {
+    return err(400, "新密码至少 6 位");
+  }
+
+  const verified = await verifyAccountCredentials(env, username, currentPassword);
+  if (!verified.ok || !verified.user) return err(401, "当前密码错误");
+
+  await ensureUsersTable(env);
+  const nextUsername = newUsername || verified.user.username;
+  if (nextUsername !== verified.user.username) {
+    const dup = await env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(nextUsername).first<{ id: number }>();
+    if (dup) return err(409, "该账号名已存在");
+  }
+
+  const now = Date.now();
+  const nextVer = (verified.user.token_version || 1) + 1;
+  if (newPassword) {
+    const hash = await hashPassword(newPassword);
+    await env.DB.prepare("UPDATE users SET username = ?, password_hash = ?, token_version = ?, updated_at = ? WHERE username = ?")
+      .bind(nextUsername, hash, nextVer, now, verified.user.username)
+      .run();
+  } else {
+    await env.DB.prepare("UPDATE users SET username = ?, token_version = ?, updated_at = ? WHERE username = ?")
+      .bind(nextUsername, nextVer, now, verified.user.username)
+      .run();
+  }
+
+  const nextUser = { username: nextUsername, role: verified.user.role, token_version: nextVer };
+  const token = await signSession(env, nextUser);
+  const sec = isHttpsReq(req) ? " Secure;" : "";
+  return json({ ok: true, username: nextUsername }, 200, {
+    "set-cookie": `${COOKIE}=${token}; HttpOnly;${sec} Path=/; SameSite=Lax; Max-Age=${7 * 86400}`,
+  });
 }
 
 /* ---------- /api/config ---------- */
@@ -197,7 +272,7 @@ export async function putConfig(req: Request, env: Env): Promise<Response> {
 
 /* ---------- /api/collector-config ---------- */
 export async function collectorConfig(req: Request, env: Env): Promise<Response> {
-  if (!requireToken(req, env)) return err(401, "无效令牌");
+  if (!(await requireCollector(req, env))) return err(401, "无效凭据");
   const raw = await env.KV.get(CONFIG_KEY);
   if (!raw) return json({ config_version: 0, checks: [], thresholds: null });
   const cfg = JSON.parse(raw) as {
@@ -218,7 +293,7 @@ export async function collectorConfig(req: Request, env: Env): Promise<Response>
 
 /* ---------- /api/ingest ---------- */
 export async function ingest(req: Request, env: Env): Promise<Response> {
-  if (!requireToken(req, env)) return err(401, "无效令牌");
+  if (!(await requireCollector(req, env))) return err(401, "无效凭据");
   const cl = Number(req.headers.get("content-length") || "0");
   if (Number.isFinite(cl) && cl > 256 * 1024) return err(413, "快照过大");
 

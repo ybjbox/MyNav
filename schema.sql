@@ -47,3 +47,14 @@ CREATE TABLE IF NOT EXISTS logs_hourly (
   PRIMARY KEY (bucket_ts, kind)
 );
 CREATE INDEX IF NOT EXISTS idx_logs_hourly_updated ON logs_hourly (updated_at);
+
+-- 管理员账号（单管理员起步，可扩展多账号；废弃旧单密码认证）
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'admin',
+  token_version INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);

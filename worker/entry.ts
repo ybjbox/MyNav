@@ -23,9 +23,10 @@ function withSecurityHeaders(res: Response): Response {
 
 const ROUTES: Record<string, Partial<Record<string, (req: Request, env: Env) => Promise<Response>>>> = {
   "/api/login": { POST: h.login },
+  "/api/collector/login": { POST: h.collectorLogin },
   "/api/logout": { POST: (req) => h.logout(req) },
   "/api/session": { GET: h.session },
-  "/api/password": { POST: h.password },
+  "/api/account": { PUT: h.updateAccount },
   "/api/config": { GET: h.getConfig, PUT: h.putConfig },
   "/api/collector-config": { GET: h.collectorConfig },
   "/api/ingest": { POST: h.ingest },

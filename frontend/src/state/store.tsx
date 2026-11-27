@@ -11,6 +11,7 @@ export interface Toast { id: number; text: string; err?: boolean }
 interface Store {
   ready: boolean;
   authed: boolean;
+  username: string | null;
   collectorConfigured: boolean;
   config: NavConfig; // 始终有值（默认或远端）
   configIsDefault: boolean;
@@ -21,8 +22,9 @@ interface Store {
   snapshot: Snapshot | null;
   demoMode: boolean; // 无采集器数据时用示例快照渲染
   history: Record<string, HistoryResp>; // key: device|range
-  login: (password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  updateAccount: (payload: { currentPassword: string; newUsername?: string; newPassword?: string }) => Promise<string>;
   saveConfig: (next: NavConfig) => Promise<void>;
   resetConfig: () => Promise<void>;
   refreshLatest: () => Promise<void>;
@@ -68,6 +70,7 @@ function contrastInk(hex: string): string {
 export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [authed, setAuthed] = useState(false);
+  const [username, setUsername] = useState<string | null>(null);
   const [collectorConfigured, setCollectorConfigured] = useState(false);
   const [config, setConfig] = useState<NavConfig>(defaultConfig);
   const [configIsDefault, setConfigIsDefault] = useState(true);
@@ -150,6 +153,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
         await loadConfig();
         const s = await api.session();
         setCollectorConfigured(s.collectorConfigured);
+        setUsername(s.username || null);
       } catch (e) {
         if (!isUnauthorized(e)) console.warn(e);
         // 401 时 config 接口已返回公开配置或抛错（全站私有场景）
@@ -206,16 +210,24 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     return r;
   }, [history]);
 
-  const login = useCallback(async (password: string) => {
-    await api.login(password);
+  const login = useCallback(async (user: string, password: string) => {
+    const r = await api.login(user, password);
     setAuthed(true);
+    setUsername(r.username || user);
     await loadConfig();
     await refreshLatest();
   }, [loadConfig, refreshLatest]);
 
+  const updateAccount = useCallback(async (payload: { currentPassword: string; newUsername?: string; newPassword?: string }) => {
+    const r = await api.updateAccount(payload);
+    if (r.username) setUsername(r.username);
+    return r.username;
+  }, []);
+
   const logout = useCallback(async () => {
     try { await api.logout(); } catch { /* ignore */ }
     setAuthed(false);
+    setUsername(null);
     setAdmin(false);
     setSnapshot(null);
     setDemoMode(false);
@@ -236,12 +248,12 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<Store>(
     () => ({
-      ready, authed, collectorConfigured, config, configIsDefault, previewSite, setPreviewSite, admin, setAdmin,
-      snapshot, demoMode, history, login, logout, saveConfig, resetConfig,
+      ready, authed, username, collectorConfigured, config, configIsDefault, previewSite, setPreviewSite, admin, setAdmin,
+      snapshot, demoMode, history, login, logout, updateAccount, saveConfig, resetConfig,
       refreshLatest, fetchHistory, toast, toasts,
     }),
-    [ready, authed, collectorConfigured, config, configIsDefault, previewSite, admin, snapshot, demoMode, history,
-      login, logout, saveConfig, resetConfig, refreshLatest, fetchHistory, toast, toasts],
+    [ready, authed, username, collectorConfigured, config, configIsDefault, previewSite, admin, snapshot, demoMode, history,
+      login, logout, updateAccount, saveConfig, resetConfig, refreshLatest, fetchHistory, toast, toasts],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

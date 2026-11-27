@@ -17,15 +17,15 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  session: () => req<{ authenticated: boolean; collectorConfigured: boolean }>("/api/session"),
+  session: () => req<{ authenticated: boolean; username?: string | null; role?: string | null; collectorConfigured: boolean }>("/api/session"),
   getConfig: () => req<{ config: import("../types").NavConfig; authenticated: boolean }>("/api/config"),
   putConfig: (config: import("../types").NavConfig) =>
     req<{ ok: true; version: number }>("/api/config", { method: "PUT", body: JSON.stringify({ config }) }),
-  login: (password: string) =>
-    req<{ ok: true }>("/api/login", { method: "POST", body: JSON.stringify({ password }) }),
+  login: (username: string, password: string) =>
+    req<{ ok: true; username: string; role: string }>("/api/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   logout: () => req<{ ok: true }>("/api/logout", { method: "POST" }),
-  changePassword: (oldPassword: string, newPassword: string) =>
-    req<{ ok: true }>("/api/password", { method: "POST", body: JSON.stringify({ oldPassword, newPassword }) }),
+  updateAccount: (payload: { currentPassword: string; newUsername?: string; newPassword?: string }) =>
+    req<{ ok: true; username: string }>("/api/account", { method: "PUT", body: JSON.stringify(payload) }),
   latest: () => req<import("../types").Snapshot & { stale?: boolean }>("/api/latest"),
   history: (device: string, range: string) =>
     req<import("../types").HistoryResp>(`/api/history?device=${encodeURIComponent(device)}&range=${encodeURIComponent(range)}`),

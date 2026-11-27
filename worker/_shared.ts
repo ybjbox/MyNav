@@ -1,12 +1,14 @@
-/* 共享工具：会话鉴权（JWT）、collector 令牌、密码哈希、限速 */
+/* 共享工具：账号密码会话鉴权（JWT）、采集器凭据校验、PBKDF2 密码哈希、限速 */
 export interface Env {
   DB: D1Database;
   KV: KVNamespace;
   AI?: { run: (model: string, input: Record<string, unknown>) => Promise<unknown> };
   JWT_SECRET: string;
-  COLLECTOR_TOKEN: string;
-  ADMIN_PASSWORD?: string;
-  ADMIN_PASSWORD_HASH?: string;
+  // 过渡期可选兼容旧静态采集器令牌（逐步废弃，推荐改用账号密码登录 /api/collector/login）
+  COLLECTOR_TOKEN?: string;
+  // 初始管理员账号凭据（D1 users 表为空时用于首次登录引导与自动落库）
+  USERNAME?: string;
+  PASSWORD?: string;
   // 天气 API Key 推荐走 Secret（不进 KV、不出现在配置接口/日志）。未设置时回退 KV config 以兼容现有 UI 配置。
   QWEATHER_KEY?: string;
   QWEATHER_HOST?: string;
@@ -18,10 +20,21 @@ export interface Env {
   CF_API_TOKEN?: string;
 }
 
+export interface AuthUser {
+  id?: number;
+  username: string;
+  role: string;
+  token_version: number;
+}
+
 export interface AuthResult {
   authed: boolean;
+  username?: string;
+  role?: string;
   payload?: Record<string, unknown>;
 }
+
+export const USERNAME_RE = /^[a-zA-Z0-9._-]{2,32}$/;
 
 const enc = new TextEncoder();
 
@@ -42,9 +55,17 @@ async function hmacKey(secret: string): Promise<CryptoKey> {
 }
 
 /* ---------- JWT（HS256） ---------- */
-export async function signSession(env: Env, days = 7): Promise<string> {
+async function signToken(env: Env, user: AuthUser, kind: "web" | "collector", ttlSeconds: number): Promise<string> {
   const header = { alg: "HS256", typ: "JWT" };
-  const payload = { sub: "admin", iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + days * 86400 };
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    kind,
+    sub: user.username,
+    role: user.role || "admin",
+    ver: user.token_version || 1,
+    iat: now,
+    exp: now + ttlSeconds,
+  };
   const h = b64urlEncode(enc.encode(JSON.stringify(header)));
   const p = b64urlEncode(enc.encode(JSON.stringify(payload)));
   const key = await hmacKey(env.JWT_SECRET);
@@ -52,21 +73,57 @@ export async function signSession(env: Env, days = 7): Promise<string> {
   return `${h}.${p}.${b64urlEncode(sig)}`;
 }
 
-export async function verifySession(env: Env, token: string): Promise<AuthResult> {
+export function signSession(env: Env, user: AuthUser, days = 7): Promise<string> {
+  return signToken(env, user, "web", days * 86400);
+}
+
+export function signCollectorToken(env: Env, user: AuthUser, hours = 24): Promise<string> {
+  return signToken(env, user, "collector", hours * 3600);
+}
+
+let usersTableReady = false;
+export async function ensureUsersTable(env: Env): Promise<void> {
+  if (usersTableReady) return;
+  await env.DB.exec(
+    "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT NOT NULL DEFAULT 'admin', token_version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);",
+  );
+  usersTableReady = true;
+}
+
+export async function verifyJwt(env: Env, token: string, expectedKind: "web" | "collector"): Promise<AuthResult> {
   const parts = token.split(".");
   if (parts.length !== 3) return { authed: false };
   const [h, p, sig] = parts;
   const key = await hmacKey(env.JWT_SECRET);
   const ok = await crypto.subtle.verify("HMAC", key, b64urlDecode(sig), enc.encode(`${h}.${p}`));
   if (!ok) return { authed: false };
-  let payload: { sub?: string; exp?: number };
+  let payload: { kind?: string; sub?: string; role?: string; ver?: number; exp?: number };
   try {
     payload = JSON.parse(new TextDecoder().decode(b64urlDecode(p)));
   } catch {
     return { authed: false };
   }
-  if (payload.sub !== "admin" || !payload.exp || payload.exp * 1000 < Date.now()) return { authed: false };
-  return { authed: true, payload };
+  if (payload.kind !== expectedKind || !payload.sub || !payload.exp || payload.exp * 1000 < Date.now()) {
+    return { authed: false };
+  }
+  try {
+    await ensureUsersTable(env);
+    const row = await env.DB.prepare("SELECT token_version, role FROM users WHERE username = ?")
+      .bind(payload.sub)
+      .first<{ token_version: number; role: string }>();
+    if (row) {
+      if (Number(row.token_version) !== Number(payload.ver || 1)) return { authed: false };
+      return { authed: true, username: payload.sub, role: row.role, payload };
+    }
+    // D1 尚未落库时（仅靠 USERNAME Secret 登录的首次场景），校验表确实为空
+    const cntRow = await env.DB.prepare("SELECT COUNT(*) AS cnt FROM users").first<{ cnt: number }>();
+    if ((cntRow?.cnt ?? 0) === 0 && env.USERNAME?.trim() === payload.sub) {
+      return { authed: true, username: payload.sub, role: payload.role || "admin", payload };
+    }
+    return { authed: false };
+  } catch {
+    return { authed: false };
+  }
 }
 
 export function getCookie(req: Request, name: string): string | null {
@@ -81,13 +138,31 @@ export function getCookie(req: Request, name: string): string | null {
 export async function requireAdmin(req: Request, env: Env): Promise<AuthResult> {
   const token = getCookie(req, "nav_session");
   if (!token) return { authed: false };
-  return verifySession(env, token);
+  return verifyJwt(env, token, "web");
 }
 
-export function requireToken(req: Request, env: Env): boolean {
+function constTimeEqStr(a: string, b: string): boolean {
+  const ba = enc.encode(a);
+  const bb = enc.encode(b);
+  if (ba.length !== bb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ba.length; i++) diff |= ba[i] ^ bb[i];
+  return diff === 0;
+}
+
+/** 采集器鉴权：优先校验 /api/collector/login 签发的 collector JWT；过渡期可选兼容静态 COLLECTOR_TOKEN */
+export async function requireCollector(req: Request, env: Env): Promise<boolean> {
   const auth = req.headers.get("authorization") || "";
   const m = auth.match(/^Bearer\s+(.+)$/i);
-  return !!m && m[1] === env.COLLECTOR_TOKEN && env.COLLECTOR_TOKEN.length >= 16;
+  if (!m) return false;
+  const tok = m[1].trim();
+  if (!tok) return false;
+  if (tok.includes(".")) {
+    const res = await verifyJwt(env, tok, "collector");
+    if (res.authed) return true;
+  }
+  const legacy = env.COLLECTOR_TOKEN?.trim() || "";
+  return legacy.length >= 16 && constTimeEqStr(tok, legacy);
 }
 
 /* ---------- 密码（PBKDF2-SHA256） ---------- */
@@ -98,24 +173,69 @@ export async function hashPassword(pw: string, iterations = 100000): Promise<str
   return `pbkdf2$${iterations}$${b64urlEncode(salt)}$${b64urlEncode(bits)}`;
 }
 
-export async function verifyPassword(env: Env, pw: string): Promise<boolean> {
-  const stored = await env.KV.get("admin:password_hash");
-  const target = stored || env.ADMIN_PASSWORD_HASH;
-  if (target) {
-    const [algo, iterStr, saltB64, hashB64] = target.split("$");
-    if (algo !== "pbkdf2" || !iterStr || !saltB64 || !hashB64) return false;
-    const salt = b64urlDecode(saltB64);
-    const key = await crypto.subtle.importKey("raw", enc.encode(pw), "PBKDF2", false, ["deriveBits"]);
-    const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: parseInt(iterStr), hash: "SHA-256" }, key, 256);
-    const want = b64urlDecode(hashB64);
-    if (bits.byteLength !== want.byteLength) return false;
-    let diff = 0;
-    const a = new Uint8Array(bits), b = want;
-    for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-    return diff === 0;
+export async function verifyPbkdf2Hash(pw: string, target: string): Promise<boolean> {
+  const [algo, iterStr, saltB64, hashB64] = target.split("$");
+  if (algo !== "pbkdf2" || !iterStr || !saltB64 || !hashB64) return false;
+  const iter = parseInt(iterStr, 10);
+  if (!Number.isFinite(iter) || iter < 10000) return false;
+  const salt = b64urlDecode(saltB64);
+  const key = await crypto.subtle.importKey("raw", enc.encode(pw), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations: iter, hash: "SHA-256" }, key, 256);
+  const want = b64urlDecode(hashB64);
+  if (bits.byteLength !== want.byteLength) return false;
+  let diff = 0;
+  const a = new Uint8Array(bits);
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ want[i];
+  return diff === 0;
+}
+
+export async function verifyAccountCredentials(
+  env: Env,
+  rawUsername: string,
+  pw: string,
+): Promise<{ ok: boolean; uninitialized?: boolean; user?: AuthUser }> {
+  const username = rawUsername.trim();
+  if (!username || !pw) return { ok: false };
+  await ensureUsersTable(env);
+
+  const row = await env.DB.prepare("SELECT id, username, password_hash, role, token_version FROM users WHERE username = ?")
+    .bind(username)
+    .first<{ id: number; username: string; password_hash: string; role: string; token_version: number }>();
+  if (row) {
+    const valid = await verifyPbkdf2Hash(pw, row.password_hash);
+    if (!valid) return { ok: false };
+    return { ok: true, user: { id: row.id, username: row.username, role: row.role, token_version: row.token_version } };
   }
-  // 开发兜底：明文 ADMIN_PASSWORD（仅限本地 dev）
-  return !!env.ADMIN_PASSWORD && pw === env.ADMIN_PASSWORD;
+
+  const cntRow = await env.DB.prepare("SELECT COUNT(*) AS cnt FROM users").first<{ cnt: number }>();
+  if ((cntRow?.cnt ?? 0) === 0) {
+    const seedUser = env.USERNAME?.trim() || "";
+    const seedSecret = env.PASSWORD?.trim() || "";
+    if (!seedUser || !seedSecret) {
+      return { ok: false, uninitialized: true };
+    }
+    if (!constTimeEqStr(username, seedUser)) return { ok: false };
+    // PASSWORD Secret 支持直接存明文密码或 pbkdf2$ 哈希；首次验证通过后统一转为 PBKDF2 哈希落库 D1
+    const isHashed = seedSecret.startsWith("pbkdf2$");
+    const valid = isHashed ? await verifyPbkdf2Hash(pw, seedSecret) : constTimeEqStr(pw, seedSecret);
+    if (!valid) return { ok: false };
+    const storedHash = isHashed ? seedSecret : await hashPassword(pw);
+    const now = Date.now();
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO users (username, password_hash, role, token_version, created_at, updated_at) VALUES (?, ?, 'admin', 1, ?, ?)",
+    )
+      .bind(seedUser, storedHash, now, now)
+      .run();
+    const seeded = await env.DB.prepare("SELECT id, username, role, token_version FROM users WHERE username = ?")
+      .bind(seedUser)
+      .first<{ id: number; username: string; role: string; token_version: number }>();
+    return {
+      ok: true,
+      user: seeded || { username: seedUser, role: "admin", token_version: 1 },
+    };
+  }
+
+  return { ok: false };
 }
 
 /* ---------- 简易限速（KV 计数，按 IP + 15 分钟窗口） ---------- */
