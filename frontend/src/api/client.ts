@@ -87,12 +87,46 @@ export const api = {
     }>(`/api/ai/logs${detail ? "?detail=1" : ""}`),
   aiModels: (refresh = false) =>
     req<{
-      models: { id: string; name: string; description?: string }[];
+      models: {
+        id: string;
+        name: string;
+        description?: string;
+        contextWindow?: number;
+        inputUsdPerM?: number;
+        outputUsdPerM?: number;
+        cachedUsdPerM?: number;
+        inputNeuronsPer1K?: number;
+        outputNeuronsPer1K?: number;
+        costMultiplier?: number;
+        paidOnly?: boolean;
+        reasoning?: boolean;
+      }[];
       source: "online" | "builtin";
       updatedAt: number;
     }>(`/api/ai/models${refresh ? "?refresh=1" : ""}`),
+  aiUsage: (refresh = false) =>
+    req<{
+      available: boolean;
+      reason?: string;
+      dateUtc?: string;
+      dailyFreeLimit?: number;
+      todayNeurons?: number;
+      remainingNeurons?: number;
+      requests?: number;
+      inputTokens?: number;
+      outputTokens?: number;
+      byModel?: { modelId: string; requests: number; neurons: number; inputTokens: number; outputTokens: number; inferenceMs: number }[];
+      updatedAt?: number;
+    }>(`/api/ai/usage${refresh ? "?refresh=1" : ""}`),
   aiDiagnose: (payload: { mode: "auto" | "manual"; model?: string; openwrt?: string; openclash?: string; nas?: string; question?: string }) =>
-    req<{ ok: true; model: string; mode: string; analyzedAt: number; report: string }>("/api/ai/diagnose", {
+    req<{
+      ok: true;
+      model: string;
+      mode: string;
+      analyzedAt: number;
+      report: string;
+      usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number; estimatedNeurons?: number };
+    }>("/api/ai/diagnose", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

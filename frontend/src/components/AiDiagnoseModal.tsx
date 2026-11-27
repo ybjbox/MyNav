@@ -2,31 +2,17 @@
 import { useEffect, useState } from "react";
 import { Button, Input, Segmented, Select } from "antd";
 import { api } from "../api/client";
+import { AI_FALLBACK_MODELS, formatAiModelOption, resolveActiveModelId, type AiModelInfo, type AiUsageInfo } from "../lib/aiModels";
 import { useStore } from "../state/store";
 import { IconSparkles, IconX } from "./icons";
-
-const AI_MODELS = [
-  { label: "Qwen 3.8 27B（推荐·中文强）", value: "@cf/qwen/qwen3.8-27b" },
-  { label: "Llama 3.3 70B（旗舰通用·快）", value: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" },
-  { label: "GLM 4.7 Flash（中文轻量）", value: "@cf/zai-org/glm-4.7-flash" },
-  { label: "Gemma 4 26B（Google）", value: "@cf/google/gemma-4-26b-a4b-it" },
-  { label: "Mistral Small 3.1 24B", value: "@cf/mistralai/mistral-small-3.1-24b-instruct" },
-  { label: "Qwen 2.5 Coder 32B（排错）", value: "@cf/qwen/qwen2.5-coder-32b-instruct" },
-];
-
-const RETIRED_MODEL_ALIAS: Record<string, string> = {
-  "@cf/qwen/qwen3-30b-a3b-fp8": "@cf/qwen/qwen3.8-27b",
-  "@cf/qwen/qwen2.5-7b-instruct": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-  "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": "@cf/qwen/qwen3.8-27b",
-  "@cf/google/gemma-3-12b-it": "@cf/google/gemma-4-26b-a4b-it",
-};
 
 export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
   const { config, toast } = useStore();
   const [mode, setMode] = useState<"auto" | "manual">("auto");
-  const [models, setModels] = useState<{ label: string; value: string }[]>(AI_MODELS);
-  const savedModel = config.monitor?.aiModel || AI_MODELS[0].value;
-  const [model, setModel] = useState<string>(RETIRED_MODEL_ALIAS[savedModel] || savedModel);
+  const [models, setModels] = useState<AiModelInfo[]>(AI_FALLBACK_MODELS);
+  const [model, setModel] = useState<string>(() => resolveActiveModelId(config.monitor?.aiModel));
+  const [usage, setUsage] = useState<AiUsageInfo | null>(null);
+  const [usageBusy, setUsageBusy] = useState(false);
   const [question, setQuestion] = useState("");
   const [openwrtManual, setOpenwrtManual] = useState("");
   const [openclashManual, setOpenclashManual] = useState("");
@@ -47,7 +33,12 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
     nas?: string[];
   } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [report, setReport] = useState<{ text: string; model: string; analyzedAt: number } | null>(null);
+  const [report, setReport] = useState<{
+    text: string;
+    model: string;
+    analyzedAt: number;
+    usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number; estimatedNeurons?: number };
+  } | null>(null);
 
   useEffect(() => {
     if (!props.open) return;
@@ -64,14 +55,26 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
       .catch(() => setMeta(null));
     api.aiModels()
       .then((res) => {
-        if (res.models?.length) {
-          setModels(res.models.map((m) => ({ label: m.name || m.id, value: m.id })));
-        }
+        if (res.models?.length) setModels(res.models);
       })
       .catch(() => { /* 回退内置模型列表 */ });
+    api.aiUsage(false)
+      .then(setUsage)
+      .catch(() => setUsage(null));
   }, [props.open]);
 
   if (!props.open) return null;
+
+  const refreshUsage = async () => {
+    setUsageBusy(true);
+    try {
+      setUsage(await api.aiUsage(true));
+    } catch {
+      /* 忽略 */
+    } finally {
+      setUsageBusy(false);
+    }
+  };
 
   const fetchLogsDetail = async (force = false) => {
     if (!force && logDetail && meta?.meta && logDetail.updated_at === meta.meta.updated_at) return;
@@ -104,7 +107,8 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
         nas: mode === "manual" ? nasManual : undefined,
         question: question.trim() || undefined,
       });
-      setReport({ text: res.report, model: res.model, analyzedAt: res.analyzedAt });
+      setReport({ text: res.report, model: res.model, analyzedAt: res.analyzedAt, usage: res.usage });
+      void refreshUsage();
     } catch (e) {
       toast((e as Error).message, true);
     } finally {
@@ -163,14 +167,40 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
             <Select
               value={model}
               onChange={setModel}
-              options={models}
+              options={models.map(formatAiModelOption)}
               size="small"
-              style={{ minWidth: 240 }}
+              style={{ minWidth: 280, maxWidth: 380 }}
               showSearch
               optionFilterProp="label"
               aria-label="选择 AI 模型"
             />
           </div>
+
+          {usage?.available && typeof usage.todayNeurons === "number" && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                padding: "8px 12px",
+                borderRadius: 10,
+                background: "rgba(15, 23, 42, 0.03)",
+                border: "1px solid rgba(15, 23, 42, 0.06)",
+                fontSize: 12,
+                color: "#475569",
+                flexWrap: "wrap",
+              }}
+            >
+              <span>
+                今日已用 <strong style={{ color: "#0f172a" }}>{usage.todayNeurons}</strong> / {usage.dailyFreeLimit || 10000} Neurons
+                （{Math.min(100, Math.round((usage.todayNeurons / (usage.dailyFreeLimit || 10000)) * 1000) / 10)}% · {usage.requests || 0} 次请求 · UTC {usage.dateUtc}）
+              </span>
+              <Button size="small" loading={usageBusy} onClick={() => void refreshUsage()}>
+                刷新额度
+              </Button>
+            </div>
+          )}
 
           {mode === "auto" ? (
             <div style={{ padding: "12px 14px", borderRadius: 12, background: "#f8fafc", border: "1px solid rgba(15, 23, 42, 0.08)", fontSize: 12.5, color: "#475569" }}>
@@ -287,8 +317,12 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
 
           {report && (
             <div style={{ padding: "14px 16px", borderRadius: 14, background: "#f8fafc", border: "1px solid rgba(15, 23, 42, 0.08)" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, fontSize: 11.5, color: "#64748b" }}>
-                <span>模型：{report.model} · {new Date(report.analyzedAt).toLocaleTimeString()}</span>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, fontSize: 11.5, color: "#64748b", flexWrap: "wrap", gap: 6 }}>
+                <span>
+                  模型：{report.model} · {new Date(report.analyzedAt).toLocaleTimeString()}
+                  {report.usage?.totalTokens ? ` · ${report.usage.promptTokens ?? 0}入/${report.usage.completionTokens ?? 0}出 tokens` : ""}
+                  {typeof report.usage?.estimatedNeurons === "number" ? ` · 约 ${report.usage.estimatedNeurons} Neurons` : ""}
+                </span>
                 <Button size="small" onClick={() => void copyReport()}>复制报告</Button>
               </div>
               <div style={{ whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.68, color: "#1e293b" }}>

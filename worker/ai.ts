@@ -2,10 +2,13 @@
 import { Env, err, json, rateLimited, requireAdmin } from "./_shared";
 
 const KV_LOGS_KEY = "logs:latest";
-const KV_MODELS_KEY = "ai:models:cache:v2";
+const KV_MODELS_KEY = "ai:models:cache:v3";
+const KV_USAGE_KEY = "ai:usage:cache:v1";
 const MODEL_ID_RE = /^@(?:cf|hf)\/[a-zA-Z0-9._\-\/]{3,120}$/;
 const MODEL_PRIMARY = "@cf/qwen/qwen3.8-27b";
 const MODEL_FALLBACK = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const DAILY_FREE_NEURONS = 10000;
+const BASE_OUTPUT_USD_PER_M = 0.4; // 1.0x 基准：@cf/zai-org/glm-4.7-flash 输出 $0.40/M (~36.4 Neurons/1K)
 
 // 已下线或失效的旧默认模型 ID 自动映射到当前可用模型，避免 KV 旧配置继续触发 5007
 const RETIRED_MODEL_MAP: Record<string, string> = {
@@ -19,16 +22,71 @@ export interface AiModelOption {
   id: string;
   name: string;
   description?: string;
+  contextWindow?: number;
+  inputUsdPerM?: number;
+  outputUsdPerM?: number;
+  cachedUsdPerM?: number;
+  inputNeuronsPer1K?: number;
+  outputNeuronsPer1K?: number;
+  costMultiplier?: number;
+  paidOnly?: boolean;
+  reasoning?: boolean;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+function enrichPriceFields(opt: AiModelOption): AiModelOption {
+  const outUsd = opt.outputUsdPerM;
+  const inUsd = opt.inputUsdPerM;
+  return {
+    ...opt,
+    ...(typeof inUsd === "number" ? { inputNeuronsPer1K: round2(inUsd / 0.011) } : {}),
+    ...(typeof outUsd === "number"
+      ? {
+          outputNeuronsPer1K: round2(outUsd / 0.011),
+          costMultiplier: round2(outUsd / BASE_OUTPUT_USD_PER_M),
+        }
+      : {}),
+  };
 }
 
 const BUILTIN_MODELS: AiModelOption[] = [
-  { id: "@cf/qwen/qwen3.8-27b", name: "Qwen 3.8 27B（推荐·中文强）", description: "千问 3.8 27B 指令模型，中文与网络排错能力强" },
-  { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", name: "Llama 3.3 70B（旗舰通用·快）", description: "70B FP8 旗舰模型，推理稳定且响应快" },
-  { id: "@cf/zai-org/glm-4.7-flash", name: "GLM 4.7 Flash（中文轻量）", description: "智谱轻量多语言文本模型，适合日常巡检" },
-  { id: "@cf/google/gemma-4-26b-a4b-it", name: "Gemma 4 26B（Google）", description: "Google Gemma 4 指令模型，长上下文表现佳" },
-  { id: "@cf/mistralai/mistral-small-3.1-24b-instruct", name: "Mistral Small 3.1 24B", description: "长上下文结构化分析能力强" },
-  { id: "@cf/qwen/qwen2.5-coder-32b-instruct", name: "Qwen 2.5 Coder 32B（排错）", description: "擅长日志、配置与脚本问题排查" },
-];
+  { id: "@cf/qwen/qwen3.8-27b", name: "Qwen 3.8 27B（推荐·中文强）", description: "千问 3.8 27B 指令模型，中文与网络排错能力强", contextWindow: 262144, inputUsdPerM: 0.45, outputUsdPerM: 3.2, cachedUsdPerM: 0.05, reasoning: true },
+  { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", name: "Llama 3.3 70B（旗舰通用·快）", description: "70B FP8 旗舰模型，推理稳定且响应快", contextWindow: 24000, inputUsdPerM: 0.293, outputUsdPerM: 2.253 },
+  { id: "@cf/zai-org/glm-4.7-flash", name: "GLM 4.7 Flash（中文省额度）", description: "智谱轻量多语言文本模型，适合日常高频巡检", contextWindow: 131072, inputUsdPerM: 0.0605, outputUsdPerM: 0.4, reasoning: true },
+  { id: "@cf/google/gemma-4-26b-a4b-it", name: "Gemma 4 26B（Google·超值）", description: "Google Gemma 4 指令模型，长上下文且输出单价极低", contextWindow: 256000, inputUsdPerM: 0.1, outputUsdPerM: 0.3, cachedUsdPerM: 0.05, reasoning: true },
+  { id: "@cf/mistralai/mistral-small-3.1-24b-instruct", name: "Mistral Small 3.1 24B", description: "长上下文结构化分析能力强", contextWindow: 128000, inputUsdPerM: 0.351, outputUsdPerM: 0.555 },
+  { id: "@cf/qwen/qwen2.5-coder-32b-instruct", name: "Qwen 2.5 Coder 32B（排错）", description: "擅长日志、配置与脚本问题排查", contextWindow: 32768, inputUsdPerM: 0.66, outputUsdPerM: 1.0 },
+].map(enrichPriceFields);
+
+interface CfRawProperty {
+  property_id?: string;
+  value?: unknown;
+}
+
+function parseModelProperties(props?: CfRawProperty[]): Partial<AiModelOption> {
+  if (!Array.isArray(props)) return {};
+  const meta: Partial<AiModelOption> = {};
+  for (const p of props) {
+    if (!p?.property_id) continue;
+    if (p.property_id === "require_workers_paid" && String(p.value) === "true") {
+      meta.paidOnly = true;
+    } else if (p.property_id === "context_window") {
+      const cw = Number(p.value);
+      if (Number.isFinite(cw) && cw > 0) meta.contextWindow = cw;
+    } else if (p.property_id === "reasoning" && String(p.value) === "true") {
+      meta.reasoning = true;
+    } else if (p.property_id === "price" && Array.isArray(p.value)) {
+      for (const item of p.value as { unit?: string; price?: number }[]) {
+        if (typeof item?.price !== "number" || !item.unit) continue;
+        if (item.unit.includes("cached input")) meta.cachedUsdPerM = item.price;
+        else if (item.unit.includes("input")) meta.inputUsdPerM = item.price;
+        else if (item.unit.includes("output")) meta.outputUsdPerM = item.price;
+      }
+    }
+  }
+  return meta;
+}
 
 export async function getAiModels(req: Request, env: Env): Promise<Response> {
   const { authed } = await requireAdmin(req, env);
@@ -53,19 +111,25 @@ export async function getAiModels(req: Request, env: Env): Promise<Response> {
       if (res.ok) {
         const body = (await res.json()) as {
           success?: boolean;
-          result?: { name: string; description?: string; properties?: { property_id: string; value: string }[] }[];
+          result?: { name: string; description?: string; properties?: CfRawProperty[] }[];
         };
         if (body.success && Array.isArray(body.result) && body.result.length > 0) {
           const onlineModels: AiModelOption[] = body.result
             .filter((m) => m.name && MODEL_ID_RE.test(m.name))
-            .map((m) => ({
-              id: m.name,
-              name: m.name.replace(/^@(?:cf|hf)\/[^/]+\//, ""),
-              description: (m.description || "").slice(0, 120),
-            }))
+            .map((m) =>
+              enrichPriceFields({
+                id: m.name,
+                name: m.name.replace(/^@(?:cf|hf)\/[^/]+\//, ""),
+                description: (m.description || "").slice(0, 120),
+                ...parseModelProperties(m.properties),
+              }),
+            )
             .sort((a, b) => {
+              // 免费可用模型优先于需付费模型，推荐主力模型靠前
+              const paidOrder = (a.paidOnly ? 1 : 0) - (b.paidOnly ? 1 : 0);
+              if (paidOrder !== 0) return paidOrder;
               const score = (id: string) =>
-                /qwen3\.8|llama-3\.3|glm-4\.7/i.test(id) ? 0 : /qwen|gemma-4|mistral|llama-4/i.test(id) ? 1 : 2;
+                /qwen3\.8|glm-4\.7|gemma-4|llama-3\.3/i.test(id) ? 0 : /qwen|mistral|llama-4|gpt-oss-20b/i.test(id) ? 1 : 2;
               return score(a.id) - score(b.id) || a.id.localeCompare(b.id);
             });
           if (onlineModels.length > 0) {
@@ -82,6 +146,145 @@ export async function getAiModels(req: Request, env: Env): Promise<Response> {
 
   const fallback = { models: BUILTIN_MODELS, source: "builtin" as const, updatedAt: Date.now() };
   return json(fallback);
+}
+
+export interface AiUsageModelRow {
+  modelId: string;
+  requests: number;
+  neurons: number;
+  inputTokens: number;
+  outputTokens: number;
+  inferenceMs: number;
+}
+
+export interface AiUsageResp {
+  available: boolean;
+  reason?: string;
+  dateUtc?: string;
+  dailyFreeLimit?: number;
+  todayNeurons?: number;
+  remainingNeurons?: number;
+  requests?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  byModel?: AiUsageModelRow[];
+  updatedAt?: number;
+}
+
+/** 查询账号今日（UTC）Workers AI Neurons 用量（需 CF_ACCOUNT_ID + 带 Account Analytics: Read 的 CF_API_TOKEN） */
+export async function getAiUsage(req: Request, env: Env): Promise<Response> {
+  const { authed } = await requireAdmin(req, env);
+  if (!authed) return err(401, "未登录");
+
+  const accId = env.CF_ACCOUNT_ID?.trim();
+  const apiToken = env.CF_API_TOKEN?.trim();
+  if (!accId || !apiToken) {
+    return json({ available: false, reason: "未配置 CF_ACCOUNT_ID 或 CF_API_TOKEN" } satisfies AiUsageResp);
+  }
+
+  const refresh = new URL(req.url).searchParams.get("refresh") === "1";
+  const dateUtc = new Date().toISOString().slice(0, 10);
+
+  if (!refresh) {
+    const cached = await env.KV.get<AiUsageResp>(KV_USAGE_KEY, "json");
+    if (cached?.available && cached.dateUtc === dateUtc && Date.now() - (cached.updatedAt || 0) < 60_000) {
+      return json(cached);
+    }
+  }
+
+  const query = `query ($acc: String!, $since: Date!) {
+    viewer {
+      accounts(filter: { accountTag: $acc }) {
+        aiInferenceAdaptiveGroups(limit: 50, filter: { date_geq: $since }) {
+          count
+          sum {
+            totalNeurons
+            totalInputTokens
+            totalOutputTokens
+            totalInferenceTimeMs
+          }
+          dimensions {
+            modelId
+          }
+        }
+      }
+    }
+  }`;
+
+  try {
+    const res = await fetch("https://api.cloudflare.com/client/v4/graphql", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ query, variables: { acc: accId, since: dateUtc } }),
+    });
+    if (!res.ok) {
+      return json({ available: false, reason: `GraphQL HTTP ${res.status}` } satisfies AiUsageResp);
+    }
+    const body = (await res.json()) as {
+      data?: {
+        viewer?: {
+          accounts?: {
+            aiInferenceAdaptiveGroups?: {
+              count?: number;
+              sum?: { totalNeurons?: number; totalInputTokens?: number; totalOutputTokens?: number; totalInferenceTimeMs?: number };
+              dimensions?: { modelId?: string };
+            }[];
+          }[];
+        };
+      };
+      errors?: { message?: string }[];
+    };
+    if (body.errors?.length) {
+      return json({ available: false, reason: body.errors[0]?.message || "GraphQL 查询拒绝（请确认 Token 含 Account Analytics: Read）" } satisfies AiUsageResp);
+    }
+    const groups = body.data?.viewer?.accounts?.[0]?.aiInferenceAdaptiveGroups || [];
+    let todayNeurons = 0;
+    let requests = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    const byModel: AiUsageModelRow[] = [];
+    for (const g of groups) {
+      const neurons = Number(g.sum?.totalNeurons || 0);
+      const reqs = Number(g.count || 0);
+      const inTok = Number(g.sum?.totalInputTokens || 0);
+      const outTok = Number(g.sum?.totalOutputTokens || 0);
+      const ms = Number(g.sum?.totalInferenceTimeMs || 0);
+      todayNeurons += neurons;
+      requests += reqs;
+      inputTokens += inTok;
+      outputTokens += outTok;
+      if (g.dimensions?.modelId) {
+        byModel.push({
+          modelId: g.dimensions.modelId,
+          requests: reqs,
+          neurons: round2(neurons),
+          inputTokens: inTok,
+          outputTokens: outTok,
+          inferenceMs: ms,
+        });
+      }
+    }
+    byModel.sort((a, b) => b.neurons - a.neurons);
+    const payload: AiUsageResp = {
+      available: true,
+      dateUtc,
+      dailyFreeLimit: DAILY_FREE_NEURONS,
+      todayNeurons: round2(todayNeurons),
+      remainingNeurons: round2(Math.max(0, DAILY_FREE_NEURONS - todayNeurons)),
+      requests,
+      inputTokens,
+      outputTokens,
+      byModel,
+      updatedAt: Date.now(),
+    };
+    await env.KV.put(KV_USAGE_KEY, JSON.stringify(payload), { expirationTtl: 120 });
+    return json(payload);
+  } catch (e) {
+    return json({ available: false, reason: (e as Error).message || "用量查询失败" } satisfies AiUsageResp);
+  }
 }
 
 export interface StoredIngestLogs {
@@ -267,6 +470,34 @@ function splitManualLogs(raw?: string): string[] {
     .filter(Boolean);
 }
 
+interface AiRunUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  estimatedNeurons?: number;
+}
+
+function extractAiUsage(res: unknown, modelOpt?: AiModelOption): AiRunUsage | undefined {
+  if (!res || typeof res !== "object") return undefined;
+  const u = (res as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage;
+  if (!u || typeof u !== "object") return undefined;
+  const promptTokens = typeof u.prompt_tokens === "number" ? u.prompt_tokens : undefined;
+  const completionTokens = typeof u.completion_tokens === "number" ? u.completion_tokens : undefined;
+  const totalTokens = typeof u.total_tokens === "number" ? u.total_tokens : undefined;
+  let estimatedNeurons: number | undefined;
+  if (
+    typeof promptTokens === "number" &&
+    typeof completionTokens === "number" &&
+    typeof modelOpt?.inputNeuronsPer1K === "number" &&
+    typeof modelOpt?.outputNeuronsPer1K === "number"
+  ) {
+    estimatedNeurons = round2(
+      (promptTokens / 1000) * modelOpt.inputNeuronsPer1K + (completionTokens / 1000) * modelOpt.outputNeuronsPer1K,
+    );
+  }
+  return { promptTokens, completionTokens, totalTokens, estimatedNeurons };
+}
+
 export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
   const { authed } = await requireAdmin(req, env);
   if (!authed) return err(401, "未登录");
@@ -338,20 +569,25 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
   ];
 
   let usedModel = requestedModel;
+  let rawOut: unknown;
   let resultText = "";
   try {
-    const out = await env.AI.run(requestedModel, { messages, max_tokens: 1800, temperature: 0.3 });
-    resultText = extractAiText(out);
+    rawOut = await env.AI.run(requestedModel, { messages, max_tokens: 1800, temperature: 0.3 });
+    resultText = extractAiText(rawOut);
   } catch (e1) {
     try {
       usedModel = MODEL_FALLBACK;
-      const out2 = await env.AI.run(MODEL_FALLBACK, { messages, max_tokens: 1800, temperature: 0.3 });
-      resultText = extractAiText(out2);
+      rawOut = await env.AI.run(MODEL_FALLBACK, { messages, max_tokens: 1800, temperature: 0.3 });
+      resultText = extractAiText(rawOut);
     } catch (e2) {
       const msg = (e2 as Error).message || (e1 as Error).message || "Workers AI 调用失败";
       return err(502, `Workers AI 调用失败：${msg}（本地 dev 需先执行 npx wrangler login 并连接 Cloudflare）`);
     }
   }
+
+  const cachedCatalog = await env.KV.get<{ models: AiModelOption[] }>(KV_MODELS_KEY, "json").catch(() => null);
+  const modelOpt = (cachedCatalog?.models || BUILTIN_MODELS).find((m) => m.id === usedModel);
+  const usage = extractAiUsage(rawOut, modelOpt);
 
   return json({
     ok: true,
@@ -359,5 +595,6 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
     mode,
     analyzedAt: Date.now(),
     report: resultText,
+    ...(usage ? { usage } : {}),
   });
 }

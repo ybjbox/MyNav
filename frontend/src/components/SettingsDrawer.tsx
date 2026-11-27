@@ -24,6 +24,7 @@ import { wallpapers } from "../lib/wallpapers";
 import { cloneConfig, newId } from "../lib/defaultConfig";
 import { useStore } from "../state/store";
 import { api } from "../api/client";
+import { AI_FALLBACK_MODELS, formatAiModelOption, resolveActiveModelId, type AiModelInfo, type AiUsageInfo } from "../lib/aiModels";
 import { WidgetStoreModal } from "../widgets/WidgetStoreModal";
 import { IconLibraryModal } from "./IconLibraryModal";
 import type { NavConfig, SearchEngine, WidgetInstance, WidgetSize, WidgetType } from "../types";
@@ -157,9 +158,10 @@ export function SettingsDrawer(props: {
   const [msStatus, setMsStatus] = useState<{ configured: boolean; connected: boolean; listId: string | null; listName: string | null } | null>(null);
   const [msLists, setMsLists] = useState<{ id: string; displayName: string }[]>([]);
   const [msBusy, setMsBusy] = useState(false);
-  const [aiModels, setAiModels] = useState<{ id: string; name: string; description?: string }[]>([]);
+  const [aiModels, setAiModels] = useState<AiModelInfo[]>([]);
   const [aiModelsSrc, setAiModelsSrc] = useState<"online" | "builtin" | null>(null);
   const [aiModelsBusy, setAiModelsBusy] = useState(false);
+  const [aiUsage, setAiUsage] = useState<AiUsageInfo | null>(null);
 
   const [newEngineName, setNewEngineName] = useState("");
   const [newEngineUrl, setNewEngineUrl] = useState("");
@@ -209,6 +211,11 @@ export function SettingsDrawer(props: {
           setAiModels(r.models || []);
           setAiModelsSrc(r.source);
         }
+      })
+      .catch(() => {});
+    api.aiUsage(false)
+      .then((u) => {
+        if (!cancelled) setAiUsage(u);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -874,27 +881,21 @@ export function SettingsDrawer(props: {
                       <Select
                         showSearch
                         optionFilterProp="label"
-                        value={
-                          ({
-                            "@cf/qwen/qwen3-30b-a3b-fp8": "@cf/qwen/qwen3.8-27b",
-                            "@cf/qwen/qwen2.5-7b-instruct": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-                            "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": "@cf/qwen/qwen3.8-27b",
-                            "@cf/google/gemma-3-12b-it": "@cf/google/gemma-4-26b-a4b-it",
-                          }[draft.monitor.aiModel || ""] || draft.monitor.aiModel || "@cf/qwen/qwen3.8-27b")
-                        }
-                        style={{ minWidth: 260, maxWidth: 320 }}
-                        options={(aiModels.length > 0
-                          ? aiModels
-                          : [
-                              { id: "@cf/qwen/qwen3.8-27b", name: "Qwen 3.8 27B（推荐·中文强）" },
-                              { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", name: "Llama 3.3 70B（旗舰通用·快）" },
-                              { id: "@cf/zai-org/glm-4.7-flash", name: "GLM 4.7 Flash（中文轻量）" },
-                              { id: "@cf/google/gemma-4-26b-a4b-it", name: "Gemma 4 26B（Google）" },
-                            ]
-                        ).map((m) => ({ label: m.name || m.id, value: m.id }))}
+                        value={resolveActiveModelId(draft.monitor.aiModel)}
+                        style={{ minWidth: 260, maxWidth: 360 }}
+                        options={(aiModels.length > 0 ? aiModels : AI_FALLBACK_MODELS).map(formatAiModelOption)}
                         onChange={(v) => setDraft((d) => ({ ...d, monitor: { ...d.monitor, aiModel: v } }))}
                       />
                     </div>
+                    {aiUsage?.available && typeof aiUsage.todayNeurons === "number" && (
+                      <div className="settings-row">
+                        <label>今日 AI 额度</label>
+                        <span style={{ fontSize: 12.5, color: "#475569" }}>
+                          已用 <strong>{aiUsage.todayNeurons}</strong> / {aiUsage.dailyFreeLimit || 10000} Neurons
+                          （今日 {aiUsage.requests || 0} 次 · 基准 1x = $0.40/M 输出）
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="formfoot">

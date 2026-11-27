@@ -72,6 +72,7 @@ const ROUTES: Record<string, Partial<Record<string, (req: Request, env: Env) => 
   },
   "/api/ai/logs": { GET: ai.getAiLogs },
   "/api/ai/models": { GET: ai.getAiModels },
+  "/api/ai/usage": { GET: ai.getAiUsage },
   "/api/ai/diagnose": { POST: ai.aiDiagnose },
 };
 
