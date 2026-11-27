@@ -75,6 +75,7 @@ const ROUTES: Record<string, Partial<Record<string, (req: Request, env: Env) => 
   "/api/ai/models": { GET: ai.getAiModels },
   "/api/ai/usage": { GET: ai.getAiUsage },
   "/api/ai/diagnose": { POST: ai.aiDiagnose },
+  "/api/favicon": { GET: (req) => h.favicon(req) },
 };
 
 export default {

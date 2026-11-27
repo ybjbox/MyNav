@@ -4,6 +4,7 @@ import { Button, Input, InputNumber, Segmented, Select, Switch } from "antd";
 import { IconX, IconTrash, IconUpload, IconPlus, IconSliders, IconSearch, DynIcon, iconKeys } from "./icons";
 import { newId } from "../lib/defaultConfig";
 import { ICON_LIB_CATEGORIES, ICON_LIB_EVENT, loadIconLibrary, type IconLibraryCategory, type IconLibraryEntry } from "../lib/iconLibrary";
+import { faviconUrlForSite } from "../lib/brandCatalog";
 import { IconBlock } from "./IconBlock";
 import { IconLibraryModal } from "./IconLibraryModal";
 import { useStore } from "../state/store";
@@ -231,7 +232,7 @@ export function EditServiceModal(props: {
                       }}
                       title={`${b.name} (${b.defaultUrl})`}
                     >
-                      <IconBlock name={b.name} icon={b.icon} size={20} className="ico-block" />
+                      <IconBlock url={b.defaultUrl} name={b.name} icon={b.icon} size={20} className="ico-block" />
                       <span style={{ fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>
                         {b.name}
                       </span>
@@ -262,11 +263,19 @@ export function EditServiceModal(props: {
             <div>
               <div className="row" style={{ gap: 8 }}>
                 <Input
-                  value={/^https?:/.test(item.icon || "") ? item.icon! : ""}
+                  value={/^(https?:|\/api\/favicon)/.test(item.icon || "") ? item.icon! : ""}
                   onChange={(e) => setItem({ ...item, icon: e.target.value || "globe" })}
                   placeholder="粘贴图标 URL（可选）"
                   style={{ flex: 1 }}
                 />
+                {!isFolder && faviconUrlForSite(item.url) && (
+                  <Button onClick={() => {
+                    const fav = faviconUrlForSite(item.url);
+                    if (fav) setItem({ ...item, icon: fav });
+                  }}>
+                    抓取网站图标
+                  </Button>
+                )}
                 <input
                   ref={fileRef}
                   type="file"

@@ -4,7 +4,7 @@ import { Button, ColorPicker, Input, Popconfirm, Segmented, Select } from "antd"
 import { IconX, IconPlus, IconEdit, IconTrash, IconRefresh, IconUpload, IconCheck, IconSearch, DynIcon, iconKeys } from "./icons";
 import { IconBlock } from "./IconBlock";
 import { IconCropModal } from "./IconCropModal";
-import { BRAND_CATALOG } from "../lib/brandCatalog";
+import { BRAND_CATALOG, faviconUrlForSite } from "../lib/brandCatalog";
 import { newId } from "../lib/defaultConfig";
 import {
   ICON_LIB_CATEGORIES,
@@ -69,7 +69,7 @@ export function IconLibraryModal(props: {
     setIsNew(false);
     setSrcTab(
       entry.icon.startsWith("brand:") ? "brand"
-        : /^(https?:|data:)/.test(entry.icon) ? "custom"
+        : /^(https?:|data:|\/api\/favicon)/.test(entry.icon) ? "custom"
           : "glyph",
     );
     setEditing({ ...entry });
@@ -169,7 +169,7 @@ export function IconLibraryModal(props: {
         >
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <IconBlock name={editing.name || "?"} icon={editing.icon} size={22} className="ico-block" />
+              <IconBlock url={editing.defaultUrl} name={editing.name || "?"} icon={editing.icon} size={22} className="ico-block" />
               <span style={{ fontWeight: 600, fontSize: 13.5 }}>{isNew ? "新增图标" : `编辑 · ${editing.name}`}</span>
             </div>
             <Button size="small" type="text" icon={<IconX size={14} />} onClick={() => setEditing(null)} aria-label="取消编辑" />
@@ -206,7 +206,7 @@ export function IconLibraryModal(props: {
             value={srcTab}
             onChange={(v) => setSrcTab(v as "brand" | "glyph" | "custom")}
             options={[
-              { label: "品牌矢量", value: "brand" },
+              { label: "网站图标", value: "brand" },
               { label: "基础图形", value: "glyph" },
               { label: "URL / 上传裁剪", value: "custom" },
             ]}
@@ -219,7 +219,7 @@ export function IconLibraryModal(props: {
                   key={b.slug}
                   size="small"
                   type={editing.icon === `brand:${b.slug}` ? "primary" : "default"}
-                  onClick={() => setEditing({ ...editing, icon: `brand:${b.slug}`, color: editing.color || b.color })}
+                  onClick={() => setEditing({ ...editing, icon: `brand:${b.slug}`, defaultUrl: editing.defaultUrl === "https://" || !editing.defaultUrl ? b.defaultUrl : editing.defaultUrl, color: editing.color || b.color })}
                 >
                   {b.name}
                 </Button>
@@ -246,11 +246,22 @@ export function IconLibraryModal(props: {
           {srcTab === "custom" && (
             <div className="row" style={{ gap: 8 }}>
               <Input
-                value={/^(https?:|data:)/.test(editing.icon) ? editing.icon : ""}
+                value={/^(https?:|data:|\/api\/favicon)/.test(editing.icon) ? editing.icon : ""}
                 onChange={(e) => setEditing({ ...editing, icon: e.target.value || "globe" })}
                 placeholder="粘贴图片 URL（https://...）"
                 style={{ flex: 1 }}
               />
+              {faviconUrlForSite(editing.defaultUrl) && (
+                <Button
+                  size="small"
+                  onClick={() => {
+                    const fav = faviconUrlForSite(editing.defaultUrl);
+                    if (fav) setEditing({ ...editing, icon: fav });
+                  }}
+                >
+                  抓取网站图标
+                </Button>
+              )}
               <input
                 ref={fileRef}
                 type="file"
@@ -305,7 +316,7 @@ export function IconLibraryModal(props: {
             }}
             style={{ cursor: "pointer" }}
           >
-            <IconBlock name={entry.name} icon={entry.icon} size={20} className="ico-block" />
+            <IconBlock url={entry.defaultUrl} name={entry.name} icon={entry.icon} size={20} className="ico-block" />
             <div className="il-name">{entry.name}</div>
             <div className="il-actions" onClick={(e) => e.stopPropagation()}>
               <Button

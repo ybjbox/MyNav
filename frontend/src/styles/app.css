@@ -273,12 +273,28 @@ section.block { margin-top: 34px; }
 .card:hover { transform: translateY(-2px); }
 .card:active { transform: scale(0.95); }
 .ico-wrap { position: relative; display: inline-flex; align-items: center; justify-content: center; }
-/* 应用式图标块（HyperOS 同心圆角 18px + 品牌纯色底 + 白色品牌字/图形） */
+/* 应用式图标块（HyperOS 同心圆角 18px + 实际网站图标亮面托盘 / 回退品牌色） */
 .ico-block {
   width: var(--ico-size, 56px); height: var(--ico-size, 56px); border-radius: 18px;
   display: grid; place-items: center; color: #fff;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.28);
   transition: transform var(--speed-2) cubic-bezier(0.22, 1, 0.36, 1), box-shadow var(--speed-2) var(--ease);
+}
+.ico-site {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+.ico-site img {
+  width: 64%; height: 64%;
+  object-fit: contain;
+  border-radius: 6px;
+  display: block;
+}
+.mini-ico.ico-site img,
+.fq-ico.ico-site img {
+  width: 74%; height: 74%;
+  border-radius: 3px;
 }
 .card:hover .ico-block,
 .card:hover .folder-thumb { transform: translateY(-2px) scale(1.07); box-shadow: 0 12px 26px rgba(0, 0, 0, 0.34); }

@@ -933,6 +933,105 @@ export async function putTodos(req: Request, env: Env): Promise<Response> {
   return json({ ok: true, todos: cleaned, updatedAt });
 }
 
+/* ---------- /api/favicon（实时获取并缓存对应网站实际图标；拒绝内网/保留主机防 SSRF） ---------- */
+function extractPublicFaviconHost(raw: string): string | null {
+  const s = raw.trim();
+  if (!s || s.length > 512) return null;
+  let host = "";
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      host = new URL(s).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+  } else if (!/[/?#\s:]/.test(s)) {
+    host = s.toLowerCase();
+  } else {
+    try {
+      host = new URL(`https://${s}`).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+  }
+  host = host.replace(/\.+$/, "");
+  if (!host || host.length > 253 || !host.includes(".")) return null;
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(host)) {
+    return null;
+  }
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return null;
+  if (
+    host === "localhost" ||
+    host.endsWith(".local") ||
+    host.endsWith(".lan") ||
+    host.endsWith(".home") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".arpa") ||
+    host.endsWith(".localhost")
+  ) {
+    return null;
+  }
+  return host;
+}
+
+export async function favicon(req: Request): Promise<Response> {
+  const u = new URL(req.url);
+  const host = extractPublicFaviconHost(u.searchParams.get("url") || u.searchParams.get("domain") || "");
+  if (!host) return new Response(null, { status: 404, headers: { "cache-control": "public, max-age=3600" } });
+
+  const cache = (caches as unknown as { default?: Cache }).default;
+  const cacheKey = new Request(`https://favicon.cache.internal/v1/${host}`);
+  if (cache) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) return hit;
+    } catch {
+      /* 忽略缓存异常 */
+    }
+  }
+
+  const bareHost = host.startsWith("www.") ? host.slice(4) : host;
+  const candidates = Array.from(new Set([
+    `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=128`,
+    `https://www.google.com/s2/favicons?domain=${encodeURIComponent(bareHost)}&sz=128`,
+    `https://icons.duckduckgo.com/ip3/${encodeURIComponent(host)}.ico`,
+    `https://icons.duckduckgo.com/ip3/${encodeURIComponent(bareHost)}.ico`,
+    `https://${host}/favicon.ico`,
+  ]));
+
+  for (const upstream of candidates) {
+    try {
+      const r = await fetch(upstream, {
+        headers: { "user-agent": "MyNav-Favicon/1.0" },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (r.status !== 200) continue;
+      const ct = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      if (!ct.startsWith("image/") && ct !== "application/octet-stream") continue;
+      const buf = await r.arrayBuffer();
+      if (buf.byteLength < 64 || buf.byteLength > 512 * 1024) continue;
+      const res = new Response(buf, {
+        status: 200,
+        headers: {
+          "content-type": ct.startsWith("image/") ? ct : "image/x-icon",
+          "cache-control": "public, max-age=604800",
+        },
+      });
+      if (cache) {
+        try {
+          await cache.put(cacheKey, res.clone());
+        } catch {
+          /* 忽略缓存写入失败 */
+        }
+      }
+      return res;
+    } catch {
+      /* 尝试下一个图标源 */
+    }
+  }
+
+  return new Response(null, { status: 404, headers: { "cache-control": "public, max-age=3600" } });
+}
+
 /* ---------- 公共 ---------- */
 async function requestJson<T = Record<string, unknown>>(req: Request): Promise<T> {
   return (await req.json()) as T;

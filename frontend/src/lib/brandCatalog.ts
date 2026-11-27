@@ -13,13 +13,18 @@ export interface BrandCatalogItem {
 const ALL_BRANDS: BrandCatalogItem[] = [
   // 常用
   { slug: "google", name: "Google", category: "常用", color: "#4285F4", defaultUrl: "https://www.google.com" },
+  { slug: "bing", name: "Bing", category: "常用", color: "#008373", defaultUrl: "https://www.bing.com" },
   { slug: "gmail", name: "Gmail", category: "常用", color: "#EA4335", defaultUrl: "https://mail.google.com" },
   { slug: "baidu", name: "百度", category: "常用", color: "#2932E1", defaultUrl: "https://www.baidu.com" },
   { slug: "zhihu", name: "知乎", category: "常用", color: "#0066FF", defaultUrl: "https://www.zhihu.com" },
+  { slug: "sspai", name: "少数派", category: "常用", color: "#D71E18", defaultUrl: "https://sspai.com" },
   { slug: "sinaweibo", name: "微博", category: "常用", color: "#E6162D", defaultUrl: "https://weibo.com" },
   { slug: "xiaohongshu", name: "小红书", category: "常用", color: "#FF2442", defaultUrl: "https://www.xiaohongshu.com" },
   { slug: "taobao", name: "淘宝", category: "常用", color: "#FF5000", defaultUrl: "https://www.taobao.com" },
+  { slug: "jd", name: "京东", category: "常用", color: "#E1251B", defaultUrl: "https://www.jd.com" },
   { slug: "wechat", name: "微信", category: "常用", color: "#07C160", defaultUrl: "https://wx.qq.com" },
+  { slug: "qq", name: "QQ", category: "常用", color: "#12B7F5", defaultUrl: "https://im.qq.com" },
+  { slug: "douyin", name: "抖音", category: "常用", color: "#1C1C1E", defaultUrl: "https://www.douyin.com" },
   { slug: "notion", name: "Notion", category: "常用", color: "#111111", defaultUrl: "https://www.notion.so" },
   { slug: "obsidian", name: "Obsidian", category: "常用", color: "#7C3AED", defaultUrl: "https://obsidian.md" },
   { slug: "apple", name: "Apple", category: "常用", color: "#1D1D1F", defaultUrl: "https://www.apple.com" },
@@ -34,6 +39,9 @@ const ALL_BRANDS: BrandCatalogItem[] = [
   { slug: "openai", name: "ChatGPT", category: "AI", color: "#10A37F", defaultUrl: "https://chatgpt.com" },
   { slug: "anthropic", name: "Claude", category: "AI", color: "#D97757", defaultUrl: "https://claude.ai" },
   { slug: "googlegemini", name: "Gemini", category: "AI", color: "#4E82EE", defaultUrl: "https://gemini.google.com" },
+  { slug: "deepseek", name: "DeepSeek", category: "AI", color: "#4D6BFE", defaultUrl: "https://chat.deepseek.com" },
+  { slug: "perplexity", name: "Perplexity", category: "AI", color: "#20808D", defaultUrl: "https://www.perplexity.ai" },
+  { slug: "metaso", name: "秘塔搜索", category: "AI", color: "#3B82F6", defaultUrl: "https://metaso.cn" },
 
   // 开发
   { slug: "github", name: "GitHub", category: "开发", color: "#181717", defaultUrl: "https://github.com" },
@@ -45,6 +53,7 @@ const ALL_BRANDS: BrandCatalogItem[] = [
   { slug: "figma", name: "Figma", category: "开发", color: "#F24E1E", defaultUrl: "https://www.figma.com" },
   { slug: "vercel", name: "Vercel", category: "开发", color: "#111111", defaultUrl: "https://vercel.com" },
   { slug: "cloudflare", name: "Cloudflare", category: "开发", color: "#F38020", defaultUrl: "https://dash.cloudflare.com" },
+  { slug: "cloudflarepages", name: "Pages", category: "开发", color: "#F38020", defaultUrl: "https://pages.cloudflare.com" },
   { slug: "cloudflareworkers", name: "CF Workers", category: "开发", color: "#F38020", defaultUrl: "https://workers.cloudflare.com" },
   { slug: "alibabacloud", name: "阿里云", category: "开发", color: "#FF6A00", defaultUrl: "https://www.aliyun.com" },
   { slug: "npm", name: "npm", category: "开发", color: "#CB3837", defaultUrl: "https://www.npmjs.com" },
@@ -72,21 +81,55 @@ const ALL_BRANDS: BrandCatalogItem[] = [
   { slug: "steam", name: "Steam", category: "影音", color: "#171A21", defaultUrl: "https://store.steampowered.com" },
 
   // 自托管
+  { slug: "fnnas", name: "飞牛 fnOS", category: "自托管", color: "#3674FF", defaultUrl: "https://www.fnnas.com" },
+  { slug: "istoreos", name: "iStoreOS", category: "自托管", color: "#2E90FA", defaultUrl: "https://www.istoreos.com" },
+  { slug: "alist", name: "Alist", category: "自托管", color: "#4F5BE8", defaultUrl: "https://alistgo.com" },
+  { slug: "vaultwarden", name: "Vaultwarden", category: "自托管", color: "#175DDC", defaultUrl: "https://bitwarden.com" },
   { slug: "docker", name: "Docker", category: "自托管", color: "#2496ED", defaultUrl: "https://hub.docker.com" },
-  { slug: "portainer", name: "Portainer", category: "自托管", color: "#13BEF9", defaultUrl: "http://nas.local:9000" },
-  { slug: "nginx", name: "Nginx", category: "自托管", color: "#009639", defaultUrl: "http://nas.local" },
-  { slug: "tailscale", name: "Tailscale", category: "自托管", color: "#242424", defaultUrl: "https://login.tailscale.com" },
-  { slug: "homeassistant", name: "Home Assistant", category: "自托管", color: "#18BCF2", defaultUrl: "http://homeassistant.local:8123" },
-  { slug: "synology", name: "Synology", category: "自托管", color: "#0073E6", defaultUrl: "http://nas.local:5000" },
-  { slug: "openwrt", name: "OpenWrt", category: "自托管", color: "#00B5E2", defaultUrl: "http://192.168.1.1" },
-  { slug: "jellyfin", name: "Jellyfin", category: "自托管", color: "#00A4DC", defaultUrl: "http://nas.local:8096" },
-  { slug: "qbittorrent", name: "qBittorrent", category: "自托管", color: "#2F67BA", defaultUrl: "http://nas.local:8080" },
-  { slug: "bitwarden", name: "Bitwarden", category: "自托管", color: "#175DDC", defaultUrl: "http://nas.local:8222" },
-  { slug: "nextcloud", name: "Nextcloud", category: "自托管", color: "#0082C9", defaultUrl: "http://nas.local:8081" },
+  { slug: "portainer", name: "Portainer", category: "自托管", color: "#13BEF9", defaultUrl: "https://www.portainer.io" },
+  { slug: "nginx", name: "Nginx", category: "自托管", color: "#009639", defaultUrl: "https://nginx.org" },
+  { slug: "tailscale", name: "Tailscale", category: "自托管", color: "#242424", defaultUrl: "https://tailscale.com" },
+  { slug: "homeassistant", name: "Home Assistant", category: "自托管", color: "#18BCF2", defaultUrl: "https://www.home-assistant.io" },
+  { slug: "synology", name: "Synology", category: "自托管", color: "#0073E6", defaultUrl: "https://www.synology.com" },
+  { slug: "openwrt", name: "OpenWrt", category: "自托管", color: "#00B5E2", defaultUrl: "https://openwrt.org" },
+  { slug: "jellyfin", name: "Jellyfin", category: "自托管", color: "#00A4DC", defaultUrl: "https://jellyfin.org" },
+  { slug: "qbittorrent", name: "qBittorrent", category: "自托管", color: "#2F67BA", defaultUrl: "https://www.qbittorrent.org" },
+  { slug: "bitwarden", name: "Bitwarden", category: "自托管", color: "#175DDC", defaultUrl: "https://bitwarden.com" },
+  { slug: "nextcloud", name: "Nextcloud", category: "自托管", color: "#0082C9", defaultUrl: "https://nextcloud.com" },
 ];
 
 const availableIcons = (brandIcons as { icons: Record<string, unknown> }).icons;
 
-export const BRAND_CATALOG: BrandCatalogItem[] = ALL_BRANDS.filter((item) =>
-  Object.prototype.hasOwnProperty.call(availableIcons, item.slug),
-);
+export function hasOfflineBrandSvg(slug: string): boolean {
+  return Object.prototype.hasOwnProperty.call(availableIcons, slug);
+}
+
+export const BRAND_CATALOG: BrandCatalogItem[] = ALL_BRANDS;
+
+export function findBrandBySlug(slug: string): BrandCatalogItem | undefined {
+  return BRAND_CATALOG.find((b) => b.slug === slug);
+}
+
+/** 提取适合拉取网站实际图标的公网 favicon 代理 URL；内网/IP 地址返回 null */
+export function faviconUrlForSite(rawUrl?: string): string | null {
+  if (!rawUrl || !/^https?:\/\//i.test(rawUrl.trim())) return null;
+  let host = "";
+  try {
+    host = new URL(rawUrl.trim()).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (!host || !host.includes(".")) return null;
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return null;
+  if (
+    host === "localhost" ||
+    host.endsWith(".local") ||
+    host.endsWith(".lan") ||
+    host.endsWith(".home") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".arpa")
+  ) {
+    return null;
+  }
+  return `/api/favicon?url=${encodeURIComponent(host)}`;
+}

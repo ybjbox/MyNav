@@ -1,9 +1,8 @@
-/* WeTab 式品牌图标块：优先使用官方 simple-icons 矢量品牌图标（本地离线包），
- * 其次品牌纯色底 + 白色手绘图标/品牌字。 */
+/* 图标块：优先使用对应网站真实 favicon / 自定义图片，加载失败或纯内网地址时依次回退官方矢量 / 基础图形 / 首字母 */
 import React, { useEffect, useState } from "react";
 import { Icon, addCollection } from "@iconify/react";
 import brandIcons from "../lib/brand-icons.json";
-import { BRAND_CATALOG } from "../lib/brandCatalog";
+import { BRAND_CATALOG, faviconUrlForSite, findBrandBySlug, hasOfflineBrandSvg } from "../lib/brandCatalog";
 import { ICON_LIB_EVENT, loadIconLibrary } from "../lib/iconLibrary";
 import { DynIcon } from "./icons";
 import { brandFor, brandBg, firstGlyph, matchBrand } from "../lib/brands";
@@ -27,17 +26,32 @@ let cachedSlugColors = buildDynamicSlugColors();
 export const IconBlock = React.memo(function IconBlock(props: {
   url?: string;
   name: string;
-  icon?: string; // brand:<slug>、手绘图标名、或 http(s)/data: URL
+  icon?: string; // brand:<slug>、手绘图标名、或 http(s)/data:/api/favicon URL
   size?: number; // 图形尺寸 px
   className?: string; // 容器类：ico-block / mini-ico / fq-ico
 }) {
   const { url, name, icon, size = 24 } = props;
   const [imgErr, setImgErr] = useState(false);
+  const [faviconErr, setFaviconErr] = useState(false);
   const [, setLibVer] = useState(0);
+
+  const cls = props.className || "";
+
+  // 解析对应网站的真实图标：优先匹配 brand 库中的官方站点或卡片自身公网网址
+  const explicitSlug = icon?.startsWith("brand:") ? icon.slice(6) : null;
+  const matched = explicitSlug ? findBrandBySlug(explicitSlug) : matchBrand(url, name);
+  const siteFaviconSrc =
+    (explicitSlug ? faviconUrlForSite(matched?.defaultUrl) : null) ||
+    faviconUrlForSite(url) ||
+    faviconUrlForSite(matched?.defaultUrl);
 
   useEffect(() => {
     setImgErr(false);
   }, [icon]);
+
+  useEffect(() => {
+    setFaviconErr(false);
+  }, [siteFaviconSrc]);
 
   useEffect(() => {
     const onLibChange = () => {
@@ -48,50 +62,52 @@ export const IconBlock = React.memo(function IconBlock(props: {
     return () => window.removeEventListener(ICON_LIB_EVENT, onLibChange);
   }, []);
 
-  // 1. 显式指定 brand:<slug>
-  if (icon?.startsWith("brand:")) {
-    const slug = icon.slice(6);
-    const bg = cachedSlugColors.get(slug) || brandBg(url, name);
+  // 1. 自定义图片 URL（http(s) / data: / /api/favicon），加载失败自动降级
+  if (icon && (/^(https?:\/\/|data:|\/api\/favicon)/.test(icon)) && !imgErr) {
     return (
-      <span className={props.className} style={{ background: bg }}>
-        <Icon icon={`simple-icons:${slug}`} width={size} height={size} color="#fff" />
-      </span>
-    );
-  }
-
-  // 2. 自定义图片 URL（http(s) / data:），加载失败自动降级
-  if (icon && (/^https?:\/\//.test(icon) || icon.startsWith("data:")) && !imgErr) {
-    return (
-      <span className={props.className} style={{ background: brandBg(url, name) }}>
+      <span className={`${cls} ico-site`.trim()}>
         <img
           src={icon}
-          width={size}
-          height={size}
           alt=""
           loading="lazy"
           decoding="async"
           onError={() => setImgErr(true)}
-          style={{ borderRadius: 6, objectFit: "contain" }}
         />
       </span>
     );
   }
 
-  // 3. 自动匹配官方品牌库（URL 域名或卡片名）
-  const matched = matchBrand(url, name);
-  if (matched) {
+  // 2. 对应网站的实际 favicon（覆盖全部品牌库与公网站点，替代纯白单色/首字母图标）
+  if (siteFaviconSrc && !faviconErr) {
     return (
-      <span className={props.className} style={{ background: matched.color }}>
-        <Icon icon={`simple-icons:${matched.slug}`} width={size} height={size} color="#fff" />
+      <span className={`${cls} ico-site`.trim()}>
+        <img
+          src={siteFaviconSrc}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onError={() => setFaviconErr(true)}
+        />
       </span>
     );
   }
 
-  // 4. 回退：品牌文字块 / 手绘线性图标 / 首字符
+  // 3. 回退：显式指定或自动匹配的 offline simple-icons 矢量图形
+  const fallbackSlug = explicitSlug || matched?.slug;
+  if (fallbackSlug && hasOfflineBrandSvg(fallbackSlug)) {
+    const bg = cachedSlugColors.get(fallbackSlug) || matched?.color || brandBg(url, name);
+    return (
+      <span className={cls} style={{ background: bg }}>
+        <Icon icon={`simple-icons:${fallbackSlug}`} width={size} height={size} color="#fff" />
+      </span>
+    );
+  }
+
+  // 4. 最终回退：基础图形或品牌色 + 首字符
   const brand = brandFor(url, name);
   const glyph = brand ? (brand.label ?? firstGlyph(name)) : icon ? null : firstGlyph(name);
   return (
-    <span className={props.className} style={{ background: brandBg(url, name) }}>
+    <span className={cls} style={{ background: brandBg(url, name) }}>
       {glyph ? <span className="ico-glyph">{glyph}</span> : <DynIcon name={icon || "globe"} size={size} />}
     </span>
   );

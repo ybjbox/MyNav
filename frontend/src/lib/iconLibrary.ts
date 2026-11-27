@@ -13,7 +13,8 @@ export interface IconLibraryEntry {
   builtin?: boolean;
 }
 
-export const ICON_LIB_STORAGE_KEY = "nav:icon-library";
+export const ICON_LIB_STORAGE_KEY = "nav:icon-library:v2";
+const LEGACY_STORAGE_KEY = "nav:icon-library";
 export const ICON_LIB_EVENT = "nav:iconlib-change";
 export const ICON_LIB_CATEGORIES: ("全部" | IconLibraryCategory)[] = [
   "全部", "常用", "AI", "开发", "影音", "自托管", "自定义",
@@ -34,9 +35,21 @@ export function defaultIconLibrary(): IconLibraryEntry[] {
 export function loadIconLibrary(): IconLibraryEntry[] {
   try {
     const raw = localStorage.getItem(ICON_LIB_STORAGE_KEY);
-    if (!raw) return defaultIconLibrary();
-    const parsed = JSON.parse(raw) as unknown;
-    if (Array.isArray(parsed)) return parsed as IconLibraryEntry[];
+    if (raw) {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) return parsed as IconLibraryEntry[];
+    }
+    // 迁移 v1 中用户自定义图标，同时升级内置列表为新版实际网站图标
+    const oldRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (oldRaw) {
+      const parsed = JSON.parse(oldRaw) as unknown;
+      const customs = Array.isArray(parsed)
+        ? (parsed as IconLibraryEntry[]).filter((x) => x && !x.builtin)
+        : [];
+      const merged = [...customs, ...defaultIconLibrary()];
+      localStorage.setItem(ICON_LIB_STORAGE_KEY, JSON.stringify(merged));
+      return merged;
+    }
   } catch {
     /* 忽略解析错误，回退默认 */
   }

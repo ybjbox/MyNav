@@ -156,23 +156,49 @@ export function firstGlyph(name: string): string {
   return t ? [...t][0].toUpperCase() : "?";
 }
 
-/** 从官方品牌库 BRAND_CATALOG 中按域名或名称自动匹配品牌图标 */
+/** 从官方品牌库 BRAND_CATALOG 中按域名或名称自动匹配品牌条目 */
+const NAME_ALIASES: Record<string, string> = {
+  "飞牛 fnos": "fnnas",
+  "飞牛": "fnnas",
+  fnos: "fnnas",
+  istoreos: "istoreos",
+  istore: "istoreos",
+  "少数派": "sspai",
+  pages: "cloudflarepages",
+  "cloudflare pages": "cloudflarepages",
+  "docker hub": "docker",
+  "b站": "bilibili",
+  "谷歌": "google",
+  chatgpt: "openai",
+  claude: "anthropic",
+  gemini: "googlegemini",
+  vaultwarden: "vaultwarden",
+  alist: "alist",
+};
+
 export function matchBrand(url?: string, name?: string): BrandCatalogItem | undefined {
   const h = hostOf(url);
   if (h) {
     const parts = h.split(".");
     const main = parts.length >= 2 ? parts.slice(-2).join(".") : h;
+    const byExactHost = BRAND_CATALOG.find((b) => hostOf(b.defaultUrl) === h);
+    if (byExactHost) return byExactHost;
     const byHost = BRAND_CATALOG.find((b) => {
       const bh = hostOf(b.defaultUrl);
       if (!bh) return false;
       const bParts = bh.split(".");
       const bMain = bParts.length >= 2 ? bParts.slice(-2).join(".") : bh;
-      return bh === h || bMain === main;
+      return bMain === main;
     });
     if (byHost) return byHost;
   }
   if (name) {
     const n = name.trim().toLowerCase();
+    const aliasSlug = NAME_ALIASES[n];
+    if (aliasSlug) {
+      const byAlias = BRAND_CATALOG.find((b) => b.slug === aliasSlug);
+      if (byAlias) return byAlias;
+    }
     const byName = BRAND_CATALOG.find(
       (b) => b.name.toLowerCase() === n || b.slug.toLowerCase() === n || n.includes(b.slug.toLowerCase()),
     );
