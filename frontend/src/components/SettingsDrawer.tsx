@@ -1011,6 +1011,31 @@ export function SettingsDrawer(props: {
                           />
                         </div>
 
+                        <div className="settings-row">
+                          <div>
+                            <label>思考推理档位</label>
+                            <div className="sr-desc">
+                              {selectedModel?.reasoning === false
+                                ? "当前所选模型为直出模式（无推理档位差异）；仅推理模型按此档位运行"
+                                : "默认高档位推理更透彻但耗时更长；中/低档位更快且更省 Neurons"}
+                            </div>
+                          </div>
+                          <Segmented
+                            value={draft.monitor.aiReasoningEffort || "high"}
+                            onChange={(v) =>
+                              setDraft((d) => ({
+                                ...d,
+                                monitor: { ...d.monitor, aiReasoningEffort: v as "low" | "medium" | "high" },
+                              }))
+                            }
+                            options={[
+                              { label: "高（默认）", value: "high" },
+                              { label: "中（均衡）", value: "medium" },
+                              { label: "低（快速）", value: "low" },
+                            ]}
+                          />
+                        </div>
+
                         {selectedModel && (
                           <div className="settings-block" style={{ padding: "12px 18px", borderBottom: compareList.length > 0 ? "1px solid rgba(16,26,36,0.06)" : "none", background: "rgba(248, 250, 252, 0.7)" }}>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", fontSize: 12, color: "#334155" }}>

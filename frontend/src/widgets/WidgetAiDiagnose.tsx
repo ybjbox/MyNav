@@ -12,7 +12,17 @@ export function WidgetAiDiagnose(_props: WidgetProps) {
     meta: { updated_at: number; source: string; counts: { openwrt: number; openclash: number; nas: number } } | null;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [stageHint, setStageHint] = useState("");
+  const [elapsedSec, setElapsedSec] = useState(0);
   const [report, setReport] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!busy) return;
+    const t0 = Date.now();
+    setElapsedSec(0);
+    const id = window.setInterval(() => setElapsedSec(Math.floor((Date.now() - t0) / 1000)), 500);
+    return () => window.clearInterval(id);
+  }, [busy]);
 
   useEffect(() => {
     if (!authed) {
@@ -35,16 +45,31 @@ export function WidgetAiDiagnose(_props: WidgetProps) {
   const runQuickDiagnose = async () => {
     if (!authed) return;
     setBusy(true);
+    setStageHint("连接 AI 中…");
+    setReport("");
     try {
-      const res = await api.aiDiagnose({
-        mode: "auto",
-        model: config.monitor?.aiModel,
-      });
-      setReport(res.report);
+      await api.aiDiagnoseStream(
+        {
+          mode: "auto",
+          model: config.monitor?.aiModel,
+          reasoningEffort: config.monitor?.aiReasoningEffort || "high",
+        },
+        {
+          onStage: (_st, message) => {
+            if (message) setStageHint(message);
+          },
+          onReasoning: () => setStageHint("AI 正在推理中…"),
+          onDelta: (chunk) => {
+            setStageHint("生成中…");
+            setReport((prev) => (prev || "") + chunk);
+          },
+        },
+      );
     } catch (e) {
       toast((e as Error).message, true);
     } finally {
       setBusy(false);
+      setStageHint("");
     }
   };
 
@@ -120,7 +145,7 @@ export function WidgetAiDiagnose(_props: WidgetProps) {
             {activeAlerts > 0 && <span style={{ color: "#ef4444", fontWeight: 600 }}>{activeAlerts} 条告警</span>}
           </div>
 
-          {report ? (
+          {report !== null && (report.length > 0 || busy) ? (
             <div
               className="wai-report"
               style={{
@@ -137,7 +162,7 @@ export function WidgetAiDiagnose(_props: WidgetProps) {
                 whiteSpace: "pre-wrap",
               }}
             >
-              {report}
+              {report || `${stageHint || "分析中…"} (${elapsedSec}s)`}
             </div>
           ) : (
             <div className="wai-hint" style={{ flex: 1, display: "flex", alignItems: "center", fontSize: 12, color: "#64748b" }}>
@@ -165,7 +190,7 @@ export function WidgetAiDiagnose(_props: WidgetProps) {
                 opacity: busy ? 0.72 : 1,
               }}
             >
-              {busy ? "分析中…" : report ? "重新诊断" : "一键 AI 诊断"}
+              {busy ? `分析中 ${elapsedSec}s…` : report ? "重新诊断" : "一键 AI 诊断"}
             </button>
           </div>
         </>

@@ -1,5 +1,5 @@
 /* AI 日志诊断弹窗（Cloudflare Workers AI）：支持分析采集器上报日志或手动粘贴 OpenWrt / OpenClash 日志 */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Input, Segmented, Select } from "antd";
 import { api } from "../api/client";
 import { AI_FALLBACK_MODELS, formatAiModelOption, resolveActiveModelId, type AiModelInfo, type AiUsageInfo } from "../lib/aiModels";
@@ -11,6 +11,7 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
   const [mode, setMode] = useState<"auto" | "manual">("auto");
   const [models, setModels] = useState<AiModelInfo[]>(AI_FALLBACK_MODELS);
   const [model, setModel] = useState<string>(() => resolveActiveModelId(config.monitor?.aiModel));
+  const [effort, setEffort] = useState<"low" | "medium" | "high">(() => config.monitor?.aiReasoningEffort || "high");
   const [usage, setUsage] = useState<AiUsageInfo | null>(null);
   const [usageBusy, setUsageBusy] = useState(false);
   const [question, setQuestion] = useState("");
@@ -40,6 +41,10 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
     byKey: Record<string, string[]>;
   }>({ updatedAt: 0, byKey: {} });
   const [busy, setBusy] = useState(false);
+  const [stageMsg, setStageMsg] = useState("");
+  const [reasoningChars, setReasoningChars] = useState(0);
+  const [elapsedSec, setElapsedSec] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
   const [report, setReport] = useState<{
     text: string;
     model: string;
@@ -56,6 +61,7 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
 
   useEffect(() => {
     if (!props.open) return;
+    setEffort(config.monitor?.aiReasoningEffort || "high");
     // 打开弹窗只拉轻量统计元信息；原始日志文本仅在点击「查看上报日志」时按需加载
     api.aiLogs(false)
       .then((res) => setMeta({ available: res.available, aiBound: res.aiBound, meta: res.meta }))
@@ -69,6 +75,20 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
       .then(setUsage)
       .catch(() => setUsage(null));
   }, [props.open]);
+
+  useEffect(() => {
+    if (!busy) return;
+    const t0 = Date.now();
+    setElapsedSec(0);
+    const id = window.setInterval(() => {
+      setElapsedSec(Math.round((Date.now() - t0) / 100) / 10);
+    }, 200);
+    return () => window.clearInterval(id);
+  }, [busy]);
+
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
   if (!props.open) return null;
 
@@ -138,22 +158,69 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
     if (logsOpen) void fetchLogsDetail(logTab, logDays, nextWarn, false);
   };
 
+  const stopRun = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setBusy(false);
+    setStageMsg("");
+  };
+
   const run = async () => {
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
     setBusy(true);
+    setStageMsg("正在连接分析接口…");
+    setReasoningChars(0);
+    let activeModel = model;
+    setReport({ text: "", model: activeModel, analyzedAt: Date.now() });
     try {
-      const res = await api.aiDiagnose({
-        mode,
-        model,
-        openwrt: mode === "manual" ? openwrtManual : undefined,
-        openclash: mode === "manual" ? openclashManual : undefined,
-        nas: mode === "manual" ? nasManual : undefined,
-        question: question.trim() || undefined,
-      });
-      setReport({ text: res.report, model: res.model, analyzedAt: res.analyzedAt, usage: res.usage });
-      void refreshUsage();
+      await api.aiDiagnoseStream(
+        {
+          mode,
+          model,
+          reasoningEffort: effort,
+          openwrt: mode === "manual" ? openwrtManual : undefined,
+          openclash: mode === "manual" ? openclashManual : undefined,
+          nas: mode === "manual" ? nasManual : undefined,
+          question: question.trim() || undefined,
+        },
+        {
+          onStage: (_stage, message, m) => {
+            if (m) activeModel = m;
+            if (message) setStageMsg(message);
+          },
+          onReasoning: (delta) => {
+            setReasoningChars((n) => n + delta.length);
+            setStageMsg("AI 正在深度思考并推理日志线索…");
+          },
+          onDelta: (chunk) => {
+            setStageMsg("正在实时生成诊断报告…");
+            setReport((prev) => ({
+              text: (prev?.text || "") + chunk,
+              model: activeModel,
+              analyzedAt: Date.now(),
+              usage: prev?.usage,
+            }));
+          },
+          onDone: (info) => {
+            setReport((prev) => ({
+              text: prev?.text || "",
+              model: info.model || activeModel,
+              analyzedAt: info.analyzedAt,
+              usage: info.usage,
+            }));
+            void refreshUsage();
+          },
+        },
+        ac.signal,
+      );
     } catch (e) {
-      toast((e as Error).message, true);
+      if ((e as Error).name !== "AbortError") {
+        toast((e as Error).message, true);
+      }
     } finally {
+      if (abortRef.current === ac) abortRef.current = null;
       setBusy(false);
     }
   };
@@ -206,16 +273,28 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
                 { label: "手动粘贴日志", value: "manual" },
               ]}
             />
-            <Select
-              value={model}
-              onChange={setModel}
-              options={models.map(formatAiModelOption)}
-              size="small"
-              style={{ minWidth: 280, maxWidth: 380 }}
-              showSearch
-              optionFilterProp="label"
-              aria-label="选择 AI 模型"
-            />
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <Select
+                value={model}
+                onChange={setModel}
+                options={models.map(formatAiModelOption)}
+                size="small"
+                style={{ minWidth: 250, maxWidth: 340 }}
+                showSearch
+                optionFilterProp="label"
+                aria-label="选择 AI 模型"
+              />
+              <Segmented
+                size="small"
+                value={effort}
+                onChange={(v) => setEffort(v as "low" | "medium" | "high")}
+                options={[
+                  { label: "思考:高", value: "high" },
+                  { label: "中", value: "medium" },
+                  { label: "低", value: "low" },
+                ]}
+              />
+            </div>
           </div>
 
           {usage?.available && typeof usage.todayNeurons === "number" && (
@@ -379,19 +458,46 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
               placeholder="补充问题（可选），例如：为什么最近 DNS 解析变慢或节点频繁切换？"
             />
             <Button type="primary" loading={busy} onClick={() => void run()}>
-              {busy ? "分析中…" : "开始诊断"}
+              {busy ? `分析中 ${elapsedSec.toFixed(1)}s` : "开始诊断"}
             </Button>
+            {busy && (
+              <Button onClick={stopRun}>停止</Button>
+            )}
           </div>
 
-          {report && (
+          {busy && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                padding: "9px 12px",
+                borderRadius: 10,
+                background: "rgba(16, 185, 129, 0.08)",
+                border: "1px solid rgba(16, 185, 129, 0.22)",
+                fontSize: 12.5,
+                color: "#065f46",
+                flexWrap: "wrap",
+              }}
+            >
+              <span>
+                <strong>实时进度：</strong>{stageMsg || "准备中…"}
+                {reasoningChars > 0 && !report?.text ? `（已思考 ${reasoningChars} 字）` : ""}
+              </span>
+              <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{elapsedSec.toFixed(1)}s</span>
+            </div>
+          )}
+
+          {report && (report.text || !busy) && (
             <div style={{ padding: "14px 16px", borderRadius: 14, background: "#f8fafc", border: "1px solid rgba(15, 23, 42, 0.08)" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, fontSize: 11.5, color: "#64748b", flexWrap: "wrap", gap: 6 }}>
                 <span>
-                  模型：{report.model} · {new Date(report.analyzedAt).toLocaleTimeString()}
+                  模型：{report.model} · {busy ? "流式输出中…" : new Date(report.analyzedAt).toLocaleTimeString()}
                   {report.usage?.totalTokens ? ` · ${report.usage.promptTokens ?? 0}入/${report.usage.completionTokens ?? 0}出 tokens` : ""}
                   {typeof report.usage?.estimatedNeurons === "number" ? ` · 约 ${report.usage.estimatedNeurons} Neurons` : ""}
                 </span>
-                <Button size="small" onClick={() => void copyReport()}>复制报告</Button>
+                {report.text && <Button size="small" onClick={() => void copyReport()}>复制报告</Button>}
               </div>
               <div style={{ whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.68, color: "#1e293b" }}>
                 {report.text}

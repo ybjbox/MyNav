@@ -131,7 +131,7 @@ export const api = {
       byModel?: { modelId: string; requests: number; neurons: number; inputTokens: number; outputTokens: number; inferenceMs: number }[];
       updatedAt?: number;
     }>(`/api/ai/usage${refresh ? "?refresh=1" : ""}`),
-  aiDiagnose: (payload: { mode: "auto" | "manual"; model?: string; openwrt?: string; openclash?: string; nas?: string; question?: string }) =>
+  aiDiagnose: (payload: { mode: "auto" | "manual"; model?: string; reasoningEffort?: "low" | "medium" | "high"; openwrt?: string; openclash?: string; nas?: string; question?: string }) =>
     req<{
       ok: true;
       model: string;
@@ -143,6 +143,77 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  aiDiagnoseStream: async (
+    payload: { mode: "auto" | "manual"; model?: string; reasoningEffort?: "low" | "medium" | "high"; openwrt?: string; openclash?: string; nas?: string; question?: string },
+    handlers: {
+      onStage?: (stage: string, message: string, model?: string) => void;
+      onReasoning?: (delta: string) => void;
+      onDelta?: (text: string) => void;
+      onDone?: (info: {
+        model: string;
+        analyzedAt: number;
+        usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number; estimatedNeurons?: number };
+      }) => void;
+    },
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    const res = await fetch("/api/ai/diagnose", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...payload, stream: true }),
+      signal,
+    });
+    const ct = res.headers.get("content-type") || "";
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error((body as { error?: string }).error || `HTTP ${res.status}`);
+    }
+    if (!ct.includes("text/event-stream") || !res.body) {
+      const body = (await res.json()) as {
+        model: string;
+        analyzedAt: number;
+        report: string;
+        usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number; estimatedNeurons?: number };
+      };
+      handlers.onDelta?.(body.report);
+      handlers.onDone?.({ model: body.model, analyzedAt: body.analyzedAt, usage: body.usage });
+      return;
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const frames = buf.split(/\r?\n\r?\n/);
+      buf = frames.pop() || "";
+      for (const frame of frames) {
+        for (const line of frame.split(/\r?\n/)) {
+          if (!line.startsWith("data:")) continue;
+          const raw = line.slice(5).trim();
+          if (!raw) continue;
+          const ev = JSON.parse(raw) as {
+            type?: string;
+            stage?: string;
+            message?: string;
+            model?: string;
+            delta?: string;
+            text?: string;
+            analyzedAt?: number;
+            usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number; estimatedNeurons?: number };
+            error?: string;
+          };
+          if (ev.type === "stage") handlers.onStage?.(ev.stage || "", ev.message || "", ev.model);
+          else if (ev.type === "reasoning" && ev.delta) handlers.onReasoning?.(ev.delta);
+          else if (ev.type === "delta" && ev.text) handlers.onDelta?.(ev.text);
+          else if (ev.type === "done") handlers.onDone?.({ model: ev.model || "", analyzedAt: ev.analyzedAt || Date.now(), usage: ev.usage });
+          else if (ev.type === "error") throw new Error(ev.error || "Workers AI 调用失败");
+        }
+      }
+    }
+  },
 };
 
 export function isUnauthorized(e: unknown): boolean {

@@ -87,6 +87,7 @@ export interface NavConfig {
     thresholds: { cpu: number; mem: number; disk: number; downMinutes: number; temp: number; conn: number };
     sparkMinutes: number; // 设备卡迷你曲线窗口
     aiModel?: string; // 默认 AI 日志诊断模型 ID
+    aiReasoningEffort?: "low" | "medium" | "high"; // AI 思考档位，默认 "high"
     staleAlert?: { // 云端失联告警（Workers Cron 检测采集器停止推送时主动通知）
       enabled: boolean;
       bark: { url: string; key: string };

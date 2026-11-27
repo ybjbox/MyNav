@@ -86,6 +86,7 @@ export const defaultConfig: NavConfig = {
   monitor: {
     thresholds: { cpu: 85, mem: 90, disk: 90, downMinutes: 3, temp: 65, conn: 30000 },
     sparkMinutes: 30,
+    aiReasoningEffort: "high",
     staleAlert: {
       enabled: false,
       bark: { url: "https://api.day.app", key: "" },

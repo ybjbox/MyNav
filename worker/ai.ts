@@ -2,7 +2,7 @@
 import { Env, err, json, rateLimited, requireAdmin } from "./_shared";
 
 const KV_LOGS_KEY = "logs:latest";
-const KV_MODELS_KEY = "ai:models:cache:v3";
+const KV_MODELS_KEY = "ai:models:cache:v4";
 const KV_USAGE_KEY = "ai:usage:cache:v1";
 const MODEL_ID_RE = /^@(?:cf|hf)\/[a-zA-Z0-9._\-\/]{3,120}$/;
 const MODEL_PRIMARY = "@cf/qwen/qwen3.8-27b";
@@ -31,6 +31,7 @@ export interface AiModelOption {
   costMultiplier?: number;
   paidOnly?: boolean;
   reasoning?: boolean;
+  supportedEfforts?: string[];
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -51,10 +52,10 @@ function enrichPriceFields(opt: AiModelOption): AiModelOption {
 }
 
 const BUILTIN_MODELS: AiModelOption[] = [
-  { id: "@cf/qwen/qwen3.8-27b", name: "Qwen 3.8 27B（推荐·中文强）", description: "千问 3.8 27B 指令模型，中文与网络排错能力强", contextWindow: 262144, inputUsdPerM: 0.45, outputUsdPerM: 3.2, cachedUsdPerM: 0.05, reasoning: true },
+  { id: "@cf/qwen/qwen3.8-27b", name: "Qwen 3.8 27B（推荐·中文强）", description: "千问 3.8 27B 指令模型，中文与网络排错能力强", contextWindow: 262144, inputUsdPerM: 0.45, outputUsdPerM: 3.2, cachedUsdPerM: 0.05, reasoning: true, supportedEfforts: ["xhigh", "medium", "low"] },
   { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", name: "Llama 3.3 70B（旗舰通用·快）", description: "70B FP8 旗舰模型，推理稳定且响应快", contextWindow: 24000, inputUsdPerM: 0.293, outputUsdPerM: 2.253 },
-  { id: "@cf/zai-org/glm-4.7-flash", name: "GLM 4.7 Flash（中文省额度）", description: "智谱轻量多语言文本模型，适合日常高频巡检", contextWindow: 131072, inputUsdPerM: 0.0605, outputUsdPerM: 0.4, reasoning: true },
-  { id: "@cf/google/gemma-4-26b-a4b-it", name: "Gemma 4 26B（Google·超值）", description: "Google Gemma 4 指令模型，长上下文且输出单价极低", contextWindow: 256000, inputUsdPerM: 0.1, outputUsdPerM: 0.3, cachedUsdPerM: 0.05, reasoning: true },
+  { id: "@cf/zai-org/glm-4.7-flash", name: "GLM 4.7 Flash（中文省额度）", description: "智谱轻量多语言文本模型，适合日常高频巡检", contextWindow: 131072, inputUsdPerM: 0.0605, outputUsdPerM: 0.4, reasoning: true, supportedEfforts: ["high", "medium", "low"] },
+  { id: "@cf/google/gemma-4-26b-a4b-it", name: "Gemma 4 26B（Google·超值）", description: "Google Gemma 4 指令模型，长上下文且输出单价极低", contextWindow: 256000, inputUsdPerM: 0.1, outputUsdPerM: 0.3, cachedUsdPerM: 0.05, reasoning: true, supportedEfforts: ["high", "medium", "low"] },
   { id: "@cf/mistralai/mistral-small-3.1-24b-instruct", name: "Mistral Small 3.1 24B", description: "长上下文结构化分析能力强", contextWindow: 128000, inputUsdPerM: 0.351, outputUsdPerM: 0.555 },
   { id: "@cf/qwen/qwen2.5-coder-32b-instruct", name: "Qwen 2.5 Coder 32B（排错）", description: "擅长日志、配置与脚本问题排查", contextWindow: 32768, inputUsdPerM: 0.66, outputUsdPerM: 1.0 },
 ].map(enrichPriceFields);
@@ -76,6 +77,11 @@ function parseModelProperties(props?: CfRawProperty[]): Partial<AiModelOption> {
       if (Number.isFinite(cw) && cw > 0) meta.contextWindow = cw;
     } else if (p.property_id === "reasoning" && String(p.value) === "true") {
       meta.reasoning = true;
+    } else if (p.property_id === "reasoning_effort" && p.value && typeof p.value === "object") {
+      const se = (p.value as { supported_efforts?: unknown }).supported_efforts;
+      if (Array.isArray(se) && se.length > 0) {
+        meta.supportedEfforts = se.map(String);
+      }
     } else if (p.property_id === "price" && Array.isArray(p.value)) {
       for (const item of p.value as { unit?: string; price?: number }[]) {
         if (typeof item?.price !== "number" || !item.unit) continue;
@@ -693,15 +699,51 @@ interface AiRunUsage {
   estimatedNeurons?: number;
 }
 
+type ReasoningTier = "low" | "medium" | "high";
+
+function resolveReasoningEffortParam(modelId: string, tier: ReasoningTier, modelOpt?: AiModelOption): string | undefined {
+  const isReasoning = modelOpt?.reasoning || /qwen3\.8|glm-4\.7|glm-5|gemma-4|gpt-oss|deepseek-v4/i.test(modelId);
+  if (!isReasoning) return undefined;
+  const supported = modelOpt?.supportedEfforts || (/qwen3\.8/i.test(modelId) ? ["xhigh", "medium", "low"] : undefined);
+  if (supported && supported.length > 0) {
+    if (tier === "high") {
+      return supported.find((s) => s === "high") || supported.find((s) => s === "xhigh") || supported.find((s) => s === "max");
+    }
+    if (tier === "medium") {
+      return supported.find((s) => s === "medium") || supported.find((s) => s === "high") || supported.find((s) => s === "low");
+    }
+    return supported.find((s) => s === "low") || supported.find((s) => s === "minimal");
+  }
+  return tier;
+}
+
+function buildAiInput(
+  modelId: string,
+  messages: { role: string; content: string }[],
+  stream: boolean,
+  tier: ReasoningTier,
+  modelOpt?: AiModelOption,
+): Record<string, unknown> {
+  const effort = resolveReasoningEffortParam(modelId, tier, modelOpt);
+  return {
+    messages,
+    max_tokens: tier === "high" ? 2400 : 1800,
+    temperature: 0.3,
+    ...(stream ? { stream: true } : {}),
+    ...(effort ? { reasoning_effort: effort } : {}),
+  };
+}
+
 function extractAiUsage(res: unknown, modelOpt?: AiModelOption): AiRunUsage | undefined {
   if (!res || typeof res !== "object") return undefined;
-  const u = (res as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage;
+  const u = (res as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; neurons?: number } }).usage;
   if (!u || typeof u !== "object") return undefined;
   const promptTokens = typeof u.prompt_tokens === "number" ? u.prompt_tokens : undefined;
   const completionTokens = typeof u.completion_tokens === "number" ? u.completion_tokens : undefined;
   const totalTokens = typeof u.total_tokens === "number" ? u.total_tokens : undefined;
-  let estimatedNeurons: number | undefined;
+  let estimatedNeurons: number | undefined = typeof u.neurons === "number" ? round2(u.neurons) : undefined;
   if (
+    estimatedNeurons === undefined &&
     typeof promptTokens === "number" &&
     typeof completionTokens === "number" &&
     typeof modelOpt?.inputNeuronsPer1K === "number" &&
@@ -714,13 +756,59 @@ function extractAiUsage(res: unknown, modelOpt?: AiModelOption): AiRunUsage | un
   return { promptTokens, completionTokens, totalTokens, estimatedNeurons };
 }
 
+interface ParsedSseChunk {
+  content?: string;
+  reasoning?: string;
+  promptTokens: number;
+  completionTokens: number;
+  neurons: number;
+}
+
+function parseWorkersAiChunk(rawJson: string): ParsedSseChunk | null {
+  try {
+    const obj = JSON.parse(rawJson) as {
+      response?: unknown;
+      choices?: { delta?: { content?: unknown; reasoning?: unknown; reasoning_content?: unknown } }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number; neurons?: number };
+    };
+    let content: string | undefined;
+    let reasoning: string | undefined;
+    if (Array.isArray(obj.choices) && obj.choices[0]?.delta) {
+      const d = obj.choices[0].delta;
+      if (typeof d.content === "string" && d.content.length > 0) content = d.content;
+      if (typeof d.reasoning_content === "string" && d.reasoning_content.length > 0) reasoning = d.reasoning_content;
+      else if (typeof d.reasoning === "string" && d.reasoning.length > 0) reasoning = d.reasoning;
+    } else if (typeof obj.response === "string" && obj.response.length > 0) {
+      content = obj.response;
+    }
+    return {
+      content,
+      reasoning,
+      promptTokens: Number(obj.usage?.prompt_tokens || 0),
+      completionTokens: Number(obj.usage?.completion_tokens || 0),
+      neurons: Number(obj.usage?.neurons || 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
   const { authed } = await requireAdmin(req, env);
   if (!authed) return err(401, "未登录");
   if (await rateLimited(env, req, "rl:ai", 20)) return err(429, "AI 诊断请求过于频繁，请稍后再试");
   if (!env.AI) return err(503, "Workers AI 未绑定（请检查 wrangler.toml [ai] 配置）");
 
-  let body: { mode?: string; model?: string; openwrt?: string; openclash?: string; nas?: string; question?: string };
+  let body: {
+    mode?: string;
+    model?: string;
+    reasoningEffort?: string;
+    openwrt?: string;
+    openclash?: string;
+    nas?: string;
+    question?: string;
+    stream?: boolean;
+  };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -728,71 +816,213 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
   }
 
   const mode = body.mode === "manual" ? "manual" : "auto";
+  const wantStream = body.stream === true;
+  const reasoningTier: ReasoningTier =
+    body.reasoningEffort === "low" || body.reasoningEffort === "medium" ? body.reasoningEffort : "high";
   const rawModel = body.model && MODEL_ID_RE.test(body.model.trim()) ? body.model.trim() : MODEL_PRIMARY;
   const requestedModel = RETIRED_MODEL_MAP[rawModel] || rawModel;
   const question = sanitizeLogLine(body.question || "").slice(0, 200);
-  let openwrtLines: string[] = [];
-  let openclashLines: string[] = [];
-  let nasLines: string[] = [];
+  const cachedCatalog = await env.KV.get<{ models: AiModelOption[] }>(KV_MODELS_KEY, "json").catch(() => null);
+  const catalogList = cachedCatalog?.models || BUILTIN_MODELS;
+  const findModelOpt = (id: string) => catalogList.find((m) => m.id === id) || BUILTIN_MODELS.find((m) => m.id === id);
 
-  if (mode === "manual") {
-    openwrtLines = splitManualLogs(body.openwrt);
-    openclashLines = splitManualLogs(body.openclash);
-    nasLines = splitManualLogs(body.nas);
-  } else {
-    // AI 默认仅优先读取并分析最近 24 小时日志，兼顾时效性与上下文预算
-    const rolling = await readRollingLines(env, LOG_KINDS, 24, 3000);
-    openwrtLines = rolling.openwrt;
-    openclashLines = rolling.openclash;
-    nasLines = rolling.nas;
+  const prepareData = async () => {
+    let openwrtLines: string[] = [];
+    let openclashLines: string[] = [];
+    let nasLines: string[] = [];
+
+    if (mode === "manual") {
+      openwrtLines = splitManualLogs(body.openwrt);
+      openclashLines = splitManualLogs(body.openclash);
+      nasLines = splitManualLogs(body.nas);
+    } else {
+      // AI 默认仅优先读取并分析最近 24 小时日志，兼顾时效性与上下文预算
+      const rolling = await readRollingLines(env, LOG_KINDS, 24, 3000);
+      openwrtLines = rolling.openwrt;
+      openclashLines = rolling.openclash;
+      nasLines = rolling.nas;
+    }
+
+    const openwrtText = compressLogsForAi(openwrtLines, 4200);
+    const openclashText = compressLogsForAi(openclashLines, 4200);
+    const nasText = compressLogsForAi(nasLines, 3200);
+    const deviceSummary = await readDeviceSummary(env);
+
+    return { openwrtLines, openclashLines, nasLines, openwrtText, openclashText, nasText, deviceSummary };
+  };
+
+  const buildMessages = (d: Awaited<ReturnType<typeof prepareData>>) => {
+    const sections: string[] = [];
+    if (d.deviceSummary) sections.push(`【当前设备监控与告警摘要】\n${d.deviceSummary}`);
+    if (d.openwrtText) sections.push(`【OpenWrt 路由器系统日志（近 24 小时共 ${d.openwrtLines.length} 行·已去重摘要）】\n${d.openwrtText}`);
+    if (d.openclashText) sections.push(`【OpenClash 日志（近 24 小时共 ${d.openclashLines.length} 行·已去重摘要）】\n${d.openclashText}`);
+    if (d.nasText) sections.push(`【飞牛 NAS 系统日志（近 24 小时共 ${d.nasLines.length} 行·已去重摘要）】\n${d.nasText}`);
+    if (question) sections.push(`【用户补充问题】\n${question}`);
+    return [
+      {
+        role: "system",
+        content:
+          "你是一位精通 OpenWrt (FanchmWrt)、Linux/Debian NAS、网络栈与 OpenClash (Mihomo/Clash Meta) 的资深运维工程师。" +
+          "请根据提供的设备监控指标、OpenWrt 路由器系统日志、OpenClash 日志与飞牛 NAS 日志，用简体中文输出结构化诊断报告。\n" +
+          "必须严格按以下分项结构输出，不能因某一端报错较多而跳过路由器系统本身的分析：\n" +
+          "1. **整体健康与核心结论**（1-2 句话直击整体状态）\n" +
+          "2. **路由器系统（OpenWrt / FanchmWrt）分析**（独立分析内核、网口/驱动、fwxd/uwsgi/DHCP 等系统日志及负载、连接数，即使正常也要明确说明健康情况与需关注的微弱警告）\n" +
+          "3. **OpenClash 代理与链路分析**（分析内核状态、节点断连/超时、DNS/Fake-IP/TUN 等）\n" +
+          "4. **飞牛 NAS 状态与日志分析**（结合 NAS 指标与系统日志分析磁盘、温控、服务异常；若未开启 NAS 日志采集则基于指标分析并提示可开启独立日志开关）\n" +
+          "5. **具体排查与修复建议**（给出可执行的具体 LuCI、OpenClash 或 NAS 操作步骤）\n" +
+          "注意：严格依据实际日志与数据作答，不要编造不存在的报错。",
+      },
+      {
+        role: "user",
+        content: sections.join("\n\n"),
+      },
+    ];
+  };
+
+  if (wantStream) {
+    const enc = new TextEncoder();
+    const dec = new TextDecoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const sendEvent = (ev: Record<string, unknown>) => {
+          controller.enqueue(enc.encode(`data: ${JSON.stringify(ev)}\n\n`));
+        };
+        try {
+          sendEvent({ type: "stage", stage: "prepare", message: "正在读取近 24 小时日志与设备监控快照…" });
+          const data = await prepareData();
+          if (!data.openwrtText && !data.openclashText && !data.nasText && !data.deviceSummary) {
+            sendEvent({ type: "error", error: "暂无可供分析的日志或监控数据，请先粘贴日志或等待采集器上报" });
+            controller.close();
+            return;
+          }
+          sendEvent({
+            type: "stage",
+            stage: "logs_ready",
+            message: `日志与监控已就绪（OpenWrt ${data.openwrtLines.length} 行 · OpenClash ${data.openclashLines.length} 行 · NAS ${data.nasLines.length} 行），正在连接 AI 模型…`,
+          });
+
+          const messages = buildMessages(data);
+          let usedModel = requestedModel;
+          let aiRes: unknown;
+          const tierLabel = reasoningTier === "high" ? "高档位推理" : reasoningTier === "medium" ? "中档位推理" : "低档位快速";
+          sendEvent({
+            type: "stage",
+            stage: "infer",
+            model: usedModel,
+            message: `正在由 ${usedModel.replace(/^@(?:cf|hf)\/[^/]+\//, "")} 分析中（${tierLabel}）…`,
+          });
+
+          try {
+            aiRes = await env.AI!.run(usedModel, buildAiInput(usedModel, messages, true, reasoningTier, findModelOpt(usedModel)));
+          } catch {
+            usedModel = MODEL_FALLBACK;
+            sendEvent({ type: "stage", stage: "fallback", model: usedModel, message: `主模型暂不可用，切换备用模型 ${usedModel.replace(/^@(?:cf|hf)\/[^/]+\//, "")}…` });
+            aiRes = await env.AI!.run(usedModel, buildAiInput(usedModel, messages, true, reasoningTier, findModelOpt(usedModel)));
+          }
+
+          const modelOpt = findModelOpt(usedModel);
+
+          let promptTokens = 0;
+          let completionTokens = 0;
+          let actualNeurons = 0;
+
+          if (aiRes instanceof ReadableStream) {
+            const reader = (aiRes as ReadableStream<Uint8Array>).getReader();
+            let buf = "";
+            let emittedAnyContent = false;
+            let reasoningText = "";
+
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buf += dec.decode(value, { stream: true });
+              const frames = buf.split(/\r?\n\r?\n/);
+              buf = frames.pop() || "";
+              for (const frame of frames) {
+                for (const line of frame.split(/\r?\n/)) {
+                  if (!line.startsWith("data:")) continue;
+                  const payload = line.slice(5).trim();
+                  if (!payload || payload === "[DONE]") continue;
+                  const parsed = parseWorkersAiChunk(payload);
+                  if (!parsed) continue;
+                  promptTokens += parsed.promptTokens;
+                  completionTokens += parsed.completionTokens;
+                  actualNeurons += parsed.neurons;
+                  if (parsed.reasoning) {
+                    reasoningText += parsed.reasoning;
+                    sendEvent({ type: "reasoning", delta: parsed.reasoning });
+                  }
+                  if (parsed.content) {
+                    emittedAnyContent = true;
+                    sendEvent({ type: "delta", text: parsed.content });
+                  }
+                }
+              }
+            }
+            if (!emittedAnyContent && reasoningText.trim()) {
+              sendEvent({ type: "delta", text: reasoningText.trim() });
+            }
+            let estimatedNeurons: number | undefined = actualNeurons > 0 ? round2(actualNeurons) : undefined;
+            if (
+              estimatedNeurons === undefined &&
+              typeof modelOpt?.inputNeuronsPer1K === "number" &&
+              typeof modelOpt?.outputNeuronsPer1K === "number"
+            ) {
+              estimatedNeurons = round2(
+                (promptTokens / 1000) * modelOpt.inputNeuronsPer1K + (completionTokens / 1000) * modelOpt.outputNeuronsPer1K,
+              );
+            }
+            sendEvent({
+              type: "done",
+              model: usedModel,
+              analyzedAt: Date.now(),
+              usage: {
+                promptTokens: promptTokens || undefined,
+                completionTokens: completionTokens || undefined,
+                totalTokens: promptTokens + completionTokens || undefined,
+                estimatedNeurons,
+              },
+            });
+          } else {
+            const text = extractAiText(aiRes);
+            const usage = extractAiUsage(aiRes, modelOpt);
+            sendEvent({ type: "delta", text });
+            sendEvent({ type: "done", model: usedModel, analyzedAt: Date.now(), ...(usage ? { usage } : {}) });
+          }
+        } catch (e) {
+          const msg = (e as Error).message || "Workers AI 调用失败";
+          sendEvent({ type: "error", error: `Workers AI 调用失败：${msg}（本地 dev 需先执行 npx wrangler login 并连接 Cloudflare）` });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      status: 200,
+      headers: {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-store",
+      },
+    });
   }
 
-  const openwrtText = compressLogsForAi(openwrtLines, 4200);
-  const openclashText = compressLogsForAi(openclashLines, 4200);
-  const nasText = compressLogsForAi(nasLines, 3200);
-
-  const deviceSummary = await readDeviceSummary(env);
-  if (!openwrtText && !openclashText && !nasText && !deviceSummary) {
+  const data = await prepareData();
+  if (!data.openwrtText && !data.openclashText && !data.nasText && !data.deviceSummary) {
     return err(400, "暂无可供分析的日志或监控数据，请先粘贴日志或等待采集器上报");
   }
-
-  const sections: string[] = [];
-  if (deviceSummary) sections.push(`【当前设备监控与告警摘要】\n${deviceSummary}`);
-  if (openwrtText) sections.push(`【OpenWrt 路由器系统日志（近 24 小时共 ${openwrtLines.length} 行·已去重摘要）】\n${openwrtText}`);
-  if (openclashText) sections.push(`【OpenClash 日志（近 24 小时共 ${openclashLines.length} 行·已去重摘要）】\n${openclashText}`);
-  if (nasText) sections.push(`【飞牛 NAS 系统日志（近 24 小时共 ${nasLines.length} 行·已去重摘要）】\n${nasText}`);
-  if (question) sections.push(`【用户补充问题】\n${question}`);
-
-  const messages = [
-    {
-      role: "system",
-      content:
-        "你是一位精通 OpenWrt (FanchmWrt)、Linux/Debian NAS、网络栈与 OpenClash (Mihomo/Clash Meta) 的资深运维工程师。" +
-        "请根据提供的设备监控指标、OpenWrt 路由器系统日志、OpenClash 日志与飞牛 NAS 日志，用简体中文输出结构化诊断报告。\n" +
-        "必须严格按以下分项结构输出，不能因某一端报错较多而跳过路由器系统本身的分析：\n" +
-        "1. **整体健康与核心结论**（1-2 句话直击整体状态）\n" +
-        "2. **路由器系统（OpenWrt / FanchmWrt）分析**（独立分析内核、网口/驱动、fwxd/uwsgi/DHCP 等系统日志及负载、连接数，即使正常也要明确说明健康情况与需关注的微弱警告）\n" +
-        "3. **OpenClash 代理与链路分析**（分析内核状态、节点断连/超时、DNS/Fake-IP/TUN 等）\n" +
-        "4. **飞牛 NAS 状态与日志分析**（结合 NAS 指标与系统日志分析磁盘、温控、服务异常；若未开启 NAS 日志采集则基于指标分析并提示可开启独立日志开关）\n" +
-        "5. **具体排查与修复建议**（给出可执行的具体 LuCI、OpenClash 或 NAS 操作步骤）\n" +
-        "注意：严格依据实际日志与数据作答，不要编造不存在的报错。",
-    },
-    {
-      role: "user",
-      content: sections.join("\n\n"),
-    },
-  ];
+  const messages = buildMessages(data);
 
   let usedModel = requestedModel;
   let rawOut: unknown;
   let resultText = "";
   try {
-    rawOut = await env.AI.run(requestedModel, { messages, max_tokens: 1800, temperature: 0.3 });
+    rawOut = await env.AI.run(requestedModel, buildAiInput(requestedModel, messages, false, reasoningTier, findModelOpt(requestedModel)));
     resultText = extractAiText(rawOut);
   } catch (e1) {
     try {
       usedModel = MODEL_FALLBACK;
-      rawOut = await env.AI.run(MODEL_FALLBACK, { messages, max_tokens: 1800, temperature: 0.3 });
+      rawOut = await env.AI.run(MODEL_FALLBACK, buildAiInput(MODEL_FALLBACK, messages, false, reasoningTier, findModelOpt(MODEL_FALLBACK)));
       resultText = extractAiText(rawOut);
     } catch (e2) {
       const msg = (e2 as Error).message || (e1 as Error).message || "Workers AI 调用失败";
@@ -800,8 +1030,7 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
     }
   }
 
-  const cachedCatalog = await env.KV.get<{ models: AiModelOption[] }>(KV_MODELS_KEY, "json").catch(() => null);
-  const modelOpt = (cachedCatalog?.models || BUILTIN_MODELS).find((m) => m.id === usedModel);
+  const modelOpt = findModelOpt(usedModel);
   const usage = extractAiUsage(rawOut, modelOpt);
 
   return json({
