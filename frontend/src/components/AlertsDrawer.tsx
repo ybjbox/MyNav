@@ -23,42 +23,52 @@ export function AlertsDrawer(props: { open: boolean; onClose: () => void }) {
     return () => document.removeEventListener("keydown", onKey);
   }, [props]);
 
-  const active = snapshot?.alerts.filter((a) => !a.resolved_at) ?? [];
+  const active = snapshot?.alerts
+    ? snapshot.alerts.filter((a) => !a.resolved_at)
+    : (hist ?? []).filter((a) => !a.resolved_at);
+  const resolvedHist = (hist ?? []).filter((a) => Boolean(a.resolved_at));
 
   return (
-    <div className={`drawer${props.open ? " open" : ""}`} role="dialog" aria-label="告警面板" aria-hidden={!props.open}>
-      <div className="dhead">
-        <span className="t">告警</span>
-        {active.length > 0 && <span className="tag">{active.length} 条活动</span>}
-        <button className="iconbtn close" aria-label="关闭" onClick={props.onClose}><IconX size={15} /></button>
-      </div>
-      <div className="dbody">
-        {active.length === 0 && <div className="empty">当前没有活动告警</div>}
-        {active.map((a) => <Row key={a.id} a={a} />)}
-        <div className="group-head" style={{ marginTop: 20 }}>
-          <span className="title" style={{ fontSize: 14 }}>近期历史</span>
+    <>
+      {props.open && <div className="drawer-backdrop" onClick={props.onClose} aria-hidden="true" />}
+      <div className={`drawer${props.open ? " open" : ""}`} role="dialog" aria-modal="true" aria-label="告警面板" aria-hidden={!props.open}>
+        <div className="dhead">
+          <span className="t">告警</span>
+          {active.length > 0 && <span className="tag">{active.length} 条活动</span>}
+          <button className="iconbtn close" aria-label="关闭" onClick={props.onClose}><IconX size={15} /></button>
         </div>
-        {!hist ? (
-          <div className="skel" style={{ height: 80 }} />
-        ) : hist.length === 0 ? (
-          <div className="empty">暂无历史记录</div>
-        ) : (
-          hist.slice(0, 50).map((a) => <Row key={a.id + a.resolved_at} a={a} resolved />)
-        )}
+        <div className="dbody">
+          {active.length === 0 ? (
+            <div className="empty">当前没有活动告警</div>
+          ) : (
+            active.map((a) => <Row key={`${a.id}-${a.last_seen}`} a={a} />)
+          )}
+          <div className="group-head" style={{ marginTop: 20 }}>
+            <span className="title" style={{ fontSize: 14 }}>已恢复历史</span>
+            {hist && resolvedHist.length > 0 && <span className="count">{resolvedHist.length}</span>}
+          </div>
+          {!hist ? (
+            <div className="skel" style={{ height: 80 }} />
+          ) : resolvedHist.length === 0 ? (
+            <div className="empty">暂无已恢复的历史记录</div>
+          ) : (
+            resolvedHist.slice(0, 50).map((a) => <Row key={`${a.id}-${a.resolved_at}`} a={a} resolved />)
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
 function Row({ a, resolved }: { a: AlertItem; resolved?: boolean }) {
   return (
-    <div className={`alert-item ${a.severity}${resolved ? " resolved" : ""}`}>
+    <div className={`alert-item ${a.severity === "critical" ? "crit" : "warn"}${resolved ? " resolved" : ""}`}>
       <span className="sev" />
-      <div style={{ minWidth: 0 }}>
+      <div style={{ minWidth: 0, flex: 1 }}>
         <div className="msg">{a.message}</div>
         <div className="meta">
-          <span className="dev">{a.device}</span> · {fmtTime(a.first_seen)} 起 · 已持续 {fmtDur((a.resolved_at ?? a.last_seen) - a.first_seen)}
-          {resolved && " · 已恢复"}
+          <span className="dev">{a.device}</span> · {fmtTime(a.first_seen)} 起 · 持续 {fmtDur((a.resolved_at ?? a.last_seen) - a.first_seen)}
+          {resolved && a.resolved_at ? ` · ${fmtTime(a.resolved_at)} 已恢复` : " · 进行中"}
         </div>
       </div>
     </div>

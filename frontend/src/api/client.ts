@@ -131,7 +131,7 @@ export const api = {
       byModel?: { modelId: string; requests: number; neurons: number; inputTokens: number; outputTokens: number; inferenceMs: number }[];
       updatedAt?: number;
     }>(`/api/ai/usage${refresh ? "?refresh=1" : ""}`),
-  aiDiagnose: (payload: { mode: "auto" | "manual"; model?: string; reasoningEffort?: "low" | "medium" | "high"; openwrt?: string; openclash?: string; nas?: string; question?: string }) =>
+  aiDiagnose: (payload: { model?: string; reasoningEffort?: "low" | "medium" | "high"; question?: string }) =>
     req<{
       ok: true;
       model: string;
@@ -144,7 +144,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   aiDiagnoseStream: async (
-    payload: { mode: "auto" | "manual"; model?: string; reasoningEffort?: "low" | "medium" | "high"; openwrt?: string; openclash?: string; nas?: string; question?: string },
+    payload: { model?: string; reasoningEffort?: "low" | "medium" | "high"; question?: string },
     handlers: {
       onStage?: (stage: string, message: string, model?: string) => void;
       onReasoning?: (delta: string) => void;

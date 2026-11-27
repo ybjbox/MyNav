@@ -1043,8 +1043,12 @@ body:has(.drawer.open) {
 .checkrow input { accent-color: var(--accent); width: 15px; height: 15px; }
 
 /* ============ 告警抽屉 ============ */
+.drawer-backdrop {
+  position: fixed; inset: 0; z-index: 29;
+  background: var(--scrim, rgba(5, 8, 12, 0.45));
+}
 .drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 22; width: min(420px, 92vw);
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 30; width: min(420px, 92vw);
   background: #ffffff; color: #1c2530;
   border-left: 1px solid rgba(16, 26, 36, 0.1);
   box-shadow: -12px 0 42px rgba(15, 23, 42, 0.2);
@@ -1054,7 +1058,17 @@ body:has(.drawer.open) {
 .drawer.open { transform: none; }
 .drawer .dhead { display: flex; align-items: center; gap: 10px; padding: 18px 22px; border-bottom: 1px solid rgba(16, 26, 36, 0.08); }
 .drawer .dhead .t { font-size: 17px; font-weight: 700; color: #1c2530; }
+.drawer .dhead .tag {
+  font-size: var(--fs-xs); font-weight: 600;
+  padding: 2px 9px; border-radius: var(--r-full);
+  background: rgba(229, 100, 108, 0.12); color: #c2454d;
+  border: 1px solid rgba(194, 69, 77, 0.22);
+  white-space: nowrap;
+}
 .drawer .dbody { flex: 1; overflow: auto; overscroll-behavior: contain; padding: 16px 22px; }
+.drawer .group-head .title { color: #334155; }
+.drawer .group-head .count { color: #64748b; }
+.drawer .empty { color: #64748b; border-color: rgba(16, 26, 36, 0.14); background: #f8fafc; }
 .drawer .close,
 .drawer .iconbtn.close {
   margin-left: auto;
@@ -1069,9 +1083,9 @@ body:has(.drawer.open) {
 .alert-item .sev { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-top: 6px; }
 .alert-item.warn .sev { background: var(--warn); }
 .alert-item.crit .sev { background: var(--danger); }
-.alert-item.resolved { opacity: 0.55; }
-.alert-item .msg { font-size: var(--fs-sm); color: #1e293b; }
-.alert-item .meta { font-size: var(--fs-xs); color: #64748b; font-family: var(--font-num); margin-top: 3px; }
+.alert-item.resolved { opacity: 0.65; }
+.alert-item .msg { font-size: var(--fs-sm); color: #1e293b; word-break: break-word; overflow-wrap: anywhere; line-height: 1.45; }
+.alert-item .meta { font-size: var(--fs-xs); color: #64748b; font-family: var(--font-num); margin-top: 4px; line-height: 1.45; }
 .alert-item .dev { font-size: var(--fs-xs); color: #475569; font-weight: 600; }
 
 /* ============ 管理模式 ============ */

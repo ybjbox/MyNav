@@ -13,11 +13,11 @@
   --border: rgba(255, 255, 255, 0.08);
   --border-2: rgba(255, 255, 255, 0.16);
 
-  /* 唯一强调色：极光绿松石（品牌/主操作/数据高亮） */
-  --accent: #43e0a0;
-  --accent-ink: #0b0f14;
-  --accent-dim: rgba(67, 224, 160, 0.13);
-  --accent-glow: rgba(67, 224, 160, 0.35);
+  /* 唯一强调色：克莱因蓝（品牌/主操作/数据高亮） */
+  --accent: #3261e3;
+  --accent-ink: #ffffff;
+  --accent-dim: rgba(50, 97, 227, 0.16);
+  --accent-glow: rgba(50, 97, 227, 0.36);
 
   /* 语义色 */
   --success: #43e0a0;
@@ -94,10 +94,10 @@ html[data-theme="light"] {
   --faint: #93a1ad;
   --border: rgba(16, 26, 36, 0.1);
   --border-2: rgba(16, 26, 36, 0.2);
-  --accent: #0b8f5f;
+  --accent: #3261e3;
   --accent-ink: #ffffff;
-  --accent-dim: rgba(11, 143, 95, 0.1);
-  --accent-glow: rgba(11, 143, 95, 0.25);
+  --accent-dim: rgba(50, 97, 227, 0.12);
+  --accent-glow: rgba(50, 97, 227, 0.28);
   --success: #0b8f5f;
   --warn: #a9700f;
   --danger: #c2454d;

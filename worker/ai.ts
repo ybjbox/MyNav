@@ -684,14 +684,6 @@ function compressLogsForAi(lines: string[], maxChars: number): string {
   return out.length > maxChars ? out.slice(-maxChars) : out;
 }
 
-function splitManualLogs(raw?: string): string[] {
-  return String(raw || "")
-    .split(/\r?\n/)
-    .slice(-120)
-    .map(sanitizeLogLine)
-    .filter(Boolean);
-}
-
 interface AiRunUsage {
   promptTokens?: number;
   completionTokens?: number;
@@ -803,9 +795,6 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
     mode?: string;
     model?: string;
     reasoningEffort?: string;
-    openwrt?: string;
-    openclash?: string;
-    nas?: string;
     question?: string;
     stream?: boolean;
   };
@@ -815,7 +804,10 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
     return err(400, "JSON 格式错误");
   }
 
-  const mode = body.mode === "manual" ? "manual" : "auto";
+  if (body.mode === "manual") {
+    return err(400, "已废弃手动上传日志模式，仅支持自动读取采集器上报日志");
+  }
+  const mode = "auto";
   const wantStream = body.stream === true;
   const reasoningTier: ReasoningTier =
     body.reasoningEffort === "low" || body.reasoningEffort === "medium" ? body.reasoningEffort : "high";
@@ -827,21 +819,11 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
   const findModelOpt = (id: string) => catalogList.find((m) => m.id === id) || BUILTIN_MODELS.find((m) => m.id === id);
 
   const prepareData = async () => {
-    let openwrtLines: string[] = [];
-    let openclashLines: string[] = [];
-    let nasLines: string[] = [];
-
-    if (mode === "manual") {
-      openwrtLines = splitManualLogs(body.openwrt);
-      openclashLines = splitManualLogs(body.openclash);
-      nasLines = splitManualLogs(body.nas);
-    } else {
-      // AI 默认仅优先读取并分析最近 24 小时日志，兼顾时效性与上下文预算
-      const rolling = await readRollingLines(env, LOG_KINDS, 24, 3000);
-      openwrtLines = rolling.openwrt;
-      openclashLines = rolling.openclash;
-      nasLines = rolling.nas;
-    }
+    // AI 默认仅优先读取并分析最近 24 小时日志，兼顾时效性与上下文预算
+    const rolling = await readRollingLines(env, LOG_KINDS, 24, 3000);
+    const openwrtLines = rolling.openwrt;
+    const openclashLines = rolling.openclash;
+    const nasLines = rolling.nas;
 
     const openwrtText = compressLogsForAi(openwrtLines, 4200);
     const openclashText = compressLogsForAi(openclashLines, 4200);
@@ -891,7 +873,7 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
           sendEvent({ type: "stage", stage: "prepare", message: "正在读取近 24 小时日志与设备监控快照…" });
           const data = await prepareData();
           if (!data.openwrtText && !data.openclashText && !data.nasText && !data.deviceSummary) {
-            sendEvent({ type: "error", error: "暂无可供分析的日志或监控数据，请先粘贴日志或等待采集器上报" });
+            sendEvent({ type: "error", error: "暂无可供分析的自动上报日志或监控数据，请等待采集器上报" });
             controller.close();
             return;
           }
@@ -1009,7 +991,7 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
 
   const data = await prepareData();
   if (!data.openwrtText && !data.openclashText && !data.nasText && !data.deviceSummary) {
-    return err(400, "暂无可供分析的日志或监控数据，请先粘贴日志或等待采集器上报");
+    return err(400, "暂无可供分析的自动上报日志或监控数据，请等待采集器上报");
   }
   const messages = buildMessages(data);
 

@@ -11,7 +11,7 @@ export default function AntdShell({ children }: { children: React.ReactNode }) {
       locale={zhCN}
       theme={{
         token: {
-          colorPrimary: activeAccent || "#0b8f5f",
+          colorPrimary: activeAccent || "#3261e3",
           borderRadius: 10,
           controlHeight: 34,
           fontFamily: "var(--font-ui)",

@@ -16,10 +16,9 @@ export const defaultConfig: NavConfig = {
   privacy: { publicNav: true },
   search: {
     engines: [
-      { id: "google", name: "Google", url: "https://www.google.com/search?q=%s" },
+      { id: "google", name: "谷歌", url: "https://www.google.com/search?q=%s" },
       { id: "bing", name: "Bing", url: "https://www.bing.com/search?q=%s" },
-      { id: "github", name: "GitHub", url: "https://github.com/search?q=%s" },
-      { id: "bili", name: "B站", url: "https://search.bilibili.com/all?keyword=%s" },
+      { id: "baidu", name: "百度", url: "https://www.baidu.com/s?wd=%s" },
     ],
     default: "google",
     history: true,

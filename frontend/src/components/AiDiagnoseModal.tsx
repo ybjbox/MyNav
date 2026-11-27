@@ -1,4 +1,4 @@
-/* AI 日志诊断弹窗（Cloudflare Workers AI）：支持分析采集器上报日志或手动粘贴 OpenWrt / OpenClash 日志 */
+/* AI 日志诊断弹窗（Cloudflare Workers AI）：自动读取采集器上报的 OpenWrt / OpenClash / NAS 日志进行分析 */
 import { useEffect, useRef, useState } from "react";
 import { Button, Input, Segmented, Select } from "antd";
 import { api } from "../api/client";
@@ -8,16 +8,12 @@ import { IconSparkles, IconX } from "./icons";
 
 export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
   const { config, toast } = useStore();
-  const [mode, setMode] = useState<"auto" | "manual">("auto");
   const [models, setModels] = useState<AiModelInfo[]>(AI_FALLBACK_MODELS);
   const [model, setModel] = useState<string>(() => resolveActiveModelId(config.monitor?.aiModel));
   const [effort, setEffort] = useState<"low" | "medium" | "high">(() => config.monitor?.aiReasoningEffort || "high");
   const [usage, setUsage] = useState<AiUsageInfo | null>(null);
   const [usageBusy, setUsageBusy] = useState(false);
   const [question, setQuestion] = useState("");
-  const [openwrtManual, setOpenwrtManual] = useState("");
-  const [openclashManual, setOpenclashManual] = useState("");
-  const [nasManual, setNasManual] = useState("");
   const [meta, setMeta] = useState<{
     available: boolean;
     aiBound: boolean;
@@ -177,12 +173,8 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
     try {
       await api.aiDiagnoseStream(
         {
-          mode,
           model,
           reasoningEffort: effort,
-          openwrt: mode === "manual" ? openwrtManual : undefined,
-          openclash: mode === "manual" ? openclashManual : undefined,
-          nas: mode === "manual" ? nasManual : undefined,
           question: question.trim() || undefined,
         },
         {
@@ -265,14 +257,7 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
 
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto", paddingRight: 2 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-            <Segmented
-              value={mode}
-              onChange={(v) => setMode(v as "auto" | "manual")}
-              options={[
-                { label: "自动读取上报日志", value: "auto" },
-                { label: "手动粘贴日志", value: "manual" },
-              ]}
-            />
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: "#475569" }}>自动读取采集器上报日志</span>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <Select
                 value={model}
@@ -323,132 +308,100 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
             </div>
           )}
 
-          {mode === "auto" ? (
-            <div style={{ padding: "12px 14px", borderRadius: 12, background: "#f8fafc", border: "1px solid rgba(15, 23, 42, 0.08)", fontSize: 12.5, color: "#475569" }}>
-              {hasAutoLogs && meta?.meta ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                      <div style={{ fontWeight: 600, color: "#0f172a" }}>
-                        已就绪（云端留存 {meta.meta.retentionDays || 7} 天 · AI 默认分析近 24h）：
-                        {meta.meta.oldest_at ? `${new Date(meta.meta.oldest_at).toLocaleString()} → ` : ""}
-                        {new Date(meta.meta.updated_at).toLocaleString()}（来源：{meta.meta.source}）
-                      </div>
-                      <div>
-                        近 24h：OpenWrt {meta.meta.counts.openwrt} 行 · OpenClash {meta.meta.counts.openclash} 行 · NAS {meta.meta.counts.nas} 行
-                        {meta.meta.counts7d
-                          ? `（7 天累计：${meta.meta.counts7d.openwrt} / ${meta.meta.counts7d.openclash} / ${meta.meta.counts7d.nas}）`
-                          : ""}
-                      </div>
+          <div style={{ padding: "12px 14px", borderRadius: 12, background: "#f8fafc", border: "1px solid rgba(15, 23, 42, 0.08)", fontSize: 12.5, color: "#475569" }}>
+            {hasAutoLogs && meta?.meta ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    <div style={{ fontWeight: 600, color: "#0f172a" }}>
+                      已就绪（云端留存 {meta.meta.retentionDays || 7} 天 · AI 默认分析近 24h）：
+                      {meta.meta.oldest_at ? `${new Date(meta.meta.oldest_at).toLocaleString()} → ` : ""}
+                      {new Date(meta.meta.updated_at).toLocaleString()}（来源：{meta.meta.source}）
                     </div>
-                    <Button size="small" onClick={toggleLogsViewer}>
-                      {logsOpen ? "收起上报日志" : "查看上报日志"}
-                    </Button>
+                    <div>
+                      近 24h：OpenWrt {meta.meta.counts.openwrt} 行 · OpenClash {meta.meta.counts.openclash} 行 · NAS {meta.meta.counts.nas} 行
+                      {meta.meta.counts7d
+                        ? `（7 天累计：${meta.meta.counts7d.openwrt} / ${meta.meta.counts7d.openclash} / ${meta.meta.counts7d.nas}）`
+                        : ""}
+                    </div>
                   </div>
-                  {logsOpen && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 6, borderTop: "1px dashed rgba(15, 23, 42, 0.1)" }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                        <Segmented
+                  <Button size="small" onClick={toggleLogsViewer}>
+                    {logsOpen ? "收起上报日志" : "查看上报日志"}
+                  </Button>
+                </div>
+                {logsOpen && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 6, borderTop: "1px dashed rgba(15, 23, 42, 0.1)" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                      <Segmented
+                        size="small"
+                        value={logTab}
+                        onChange={(v) => switchLogTab(v as "openwrt" | "openclash" | "nas")}
+                        options={[
+                          { label: `OpenWrt (${meta.meta.counts.openwrt})`, value: "openwrt" },
+                          { label: `OpenClash (${meta.meta.counts.openclash})`, value: "openclash" },
+                          { label: `NAS (${meta.meta.counts.nas})`, value: "nas" },
+                        ]}
+                      />
+                      <Segmented
+                        size="small"
+                        value={logDays}
+                        onChange={(v) => switchLogDays(v as 1 | 3 | 7)}
+                        options={[
+                          { label: "近 1 天", value: 1 },
+                          { label: "近 3 天", value: 3 },
+                          { label: "近 7 天", value: 7 },
+                        ]}
+                      />
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <Button
                           size="small"
-                          value={logTab}
-                          onChange={(v) => switchLogTab(v as "openwrt" | "openclash" | "nas")}
-                          options={[
-                            { label: `OpenWrt (${meta.meta.counts.openwrt})`, value: "openwrt" },
-                            { label: `OpenClash (${meta.meta.counts.openclash})`, value: "openclash" },
-                            { label: `NAS (${meta.meta.counts.nas})`, value: "nas" },
-                          ]}
-                        />
-                        <Segmented
-                          size="small"
-                          value={logDays}
-                          onChange={(v) => switchLogDays(v as 1 | 3 | 7)}
-                          options={[
-                            { label: "近 1 天", value: 1 },
-                            { label: "近 3 天", value: 3 },
-                            { label: "近 7 天", value: 7 },
-                          ]}
-                        />
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <Button
-                            size="small"
-                            type={onlyWarnLogs ? "primary" : "default"}
-                            onClick={toggleWarnFilter}
-                          >
-                            {onlyWarnLogs ? "只看异常中" : "过滤异常"}
-                          </Button>
-                          <Button size="small" loading={logsBusy} onClick={() => void fetchLogsDetail(logTab, logDays, onlyWarnLogs, true)}>
-                            刷新
-                          </Button>
-                        </div>
+                          type={onlyWarnLogs ? "primary" : "default"}
+                          onClick={toggleWarnFilter}
+                        >
+                          {onlyWarnLogs ? "只看异常中" : "过滤异常"}
+                        </Button>
+                        <Button size="small" loading={logsBusy} onClick={() => void fetchLogsDetail(logTab, logDays, onlyWarnLogs, true)}>
+                          刷新
+                        </Button>
                       </div>
-                      <pre
-                        style={{
-                          margin: 0,
-                          maxHeight: 220,
-                          overflow: "auto",
-                          padding: "8px 10px",
-                          borderRadius: 8,
-                          background: "#0f172a",
-                          color: "#e2e8f0",
-                          fontSize: 11.5,
-                          lineHeight: 1.5,
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-word",
-                          fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-                        }}
-                      >
-                        {logsBusy && !activeLogLines
-                          ? "按需加载该时段日志中…"
-                          : activeLogLines && activeLogLines.length > 0
-                            ? activeLogLines.join("\n")
-                            : onlyWarnLogs
-                              ? `近 ${logDays} 天内未匹配到 warn/err/timeout 等异常日志`
-                              : logTab === "nas"
-                                ? "暂无 NAS 日志（如需采集请在路由器 LuCI → NAV 采集器 → 飞牛 NAS 开启「采集 NAS 系统日志」）"
-                                : `近 ${logDays} 天暂无该类日志`}
-                      </pre>
                     </div>
-                  )}
-                </div>
-              ) : (
-                <div>
-                  暂无采集器自动上报的日志（需在路由器插件 <code>nav-collector</code> 开启并等待推送）。
-                  <br />
-                  直接点下方「开始诊断」仍可分析当前设备监控与告警；或切换到「手动粘贴日志」。
-                </div>
-              )}
-            </div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#334155", marginBottom: 4 }}>OpenWrt 系统日志（可选）</div>
-                <Input.TextArea
-                  rows={5}
-                  value={openwrtManual}
-                  onChange={(e) => setOpenwrtManual(e.target.value)}
-                  placeholder="粘贴 logread 或内核日志片段（自动取最后 120 行并脱敏）"
-                />
+                    <pre
+                      style={{
+                        margin: 0,
+                        maxHeight: 220,
+                        overflow: "auto",
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        background: "#0f172a",
+                        color: "#e2e8f0",
+                        fontSize: 11.5,
+                        lineHeight: 1.5,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                      }}
+                    >
+                      {logsBusy && !activeLogLines
+                        ? "按需加载该时段日志中…"
+                        : activeLogLines && activeLogLines.length > 0
+                          ? activeLogLines.join("\n")
+                          : onlyWarnLogs
+                            ? `近 ${logDays} 天内未匹配到 warn/err/timeout 等异常日志`
+                            : logTab === "nas"
+                              ? "暂无 NAS 日志（如需采集请在路由器 LuCI → NAV 采集器 → 飞牛 NAS 开启「采集 NAS 系统日志」）"
+                              : `近 ${logDays} 天暂无该类日志`}
+                    </pre>
+                  </div>
+                )}
               </div>
+            ) : (
               <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#334155", marginBottom: 4 }}>OpenClash 日志（可选）</div>
-                <Input.TextArea
-                  rows={5}
-                  value={openclashManual}
-                  onChange={(e) => setOpenclashManual(e.target.value)}
-                  placeholder="粘贴 OpenClash 运行日志 / Mihomo 报错（自动取最后 120 行并脱敏）"
-                />
+                暂无采集器自动上报的日志（需在路由器插件 <code>nav-collector</code> 开启并等待推送）。
+                <br />
+                直接点下方「开始诊断」仍可结合当前设备监控与告警分析。
               </div>
-              <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#334155", marginBottom: 4 }}>飞牛 NAS 系统日志（可选）</div>
-                <Input.TextArea
-                  rows={5}
-                  value={nasManual}
-                  onChange={(e) => setNasManual(e.target.value)}
-                  placeholder="粘贴 journalctl / syslog 片段（自动取最后 120 行并脱敏）"
-                />
-              </div>
-            </div>
-          )}
+            )}
+          </div>
 
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <Input

@@ -45,7 +45,8 @@ const PRESET_ENGINES: SearchEngine[] = [
 ];
 
 const ACCENTS = [
-  { name: "极光绿", v: null },
+  { name: "默认蓝", v: null },
+  { name: "极光绿", v: "#0b8f5f" },
   { name: "湖青", v: "#3ec9c9" },
   { name: "天蓝", v: "#4cc9f0" },
   { name: "珊瑚", v: "#ef7b6d" },
@@ -487,20 +488,20 @@ export function SettingsDrawer(props: {
                             key={a.name}
                             type="button"
                             className={`swatch${(draft.site.accent ?? null) === a.v ? " on" : ""}`}
-                            style={{ background: a.v ?? "#43e0a0" }}
+                            style={{ background: a.v ?? "#3261e3" }}
                             title={a.name}
                             aria-label={`强调色 ${a.name}`}
                             onClick={() => patchSite({ accent: a.v })}
                           />
                         ))}
                         <ColorPicker
-                          value={draft.site.accent || "#0b8f5f"}
+                          value={draft.site.accent || "#3261e3"}
                           disabledAlpha
                           showText={(c) => c.toHexString().toUpperCase()}
                           presets={[
                             {
                               label: "推荐强调色",
-                              colors: ["#0b8f5f", "#43e0a0", "#3ec9c9", "#4cc9f0", "#ef7b6d", "#9d8cff", "#d9a441", "#ff6b9d"],
+                              colors: ["#3261e3", "#0b8f5f", "#43e0a0", "#3ec9c9", "#4cc9f0", "#ef7b6d", "#9d8cff", "#d9a441", "#ff6b9d"],
                             },
                           ]}
                           onChange={(c) => patchSite({ accent: c.toHexString() })}

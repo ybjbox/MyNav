@@ -30,13 +30,21 @@ export function fmtClock(d: Date): string {
 
 export function fmtTime(ms: number): string {
   const d = new Date(ms);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const now = new Date();
+  const hhmm = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
+    return hhmm;
+  }
+  return `${d.getMonth() + 1}/${d.getDate()} ${hhmm}`;
 }
 
 export function fmtDur(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(s / 3600);
+  if (s < 60) return `${s}s`;
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
+  if (d > 0) return h > 0 ? `${d}天 ${h}h` : `${d}天`;
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
 }
