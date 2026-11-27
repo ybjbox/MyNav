@@ -74,19 +74,24 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ id, listId }),
     }),
-  aiLogs: () =>
+  aiLogs: (detail = false) =>
     req<{
       available: boolean;
       aiBound: boolean;
-      logs: { updated_at: number; source: string; openwrt: string[]; openclash: string[] } | null;
-    }>("/api/ai/logs"),
+      meta: {
+        updated_at: number;
+        source: string;
+        counts: { openwrt: number; openclash: number; nas: number };
+      } | null;
+      logs?: { updated_at: number; source: string; openwrt: string[]; openclash: string[]; nas?: string[] } | null;
+    }>(`/api/ai/logs${detail ? "?detail=1" : ""}`),
   aiModels: (refresh = false) =>
     req<{
       models: { id: string; name: string; description?: string }[];
       source: "online" | "builtin";
       updatedAt: number;
     }>(`/api/ai/models${refresh ? "?refresh=1" : ""}`),
-  aiDiagnose: (payload: { mode: "auto" | "manual"; model?: string; openwrt?: string; openclash?: string; question?: string }) =>
+  aiDiagnose: (payload: { mode: "auto" | "manual"; model?: string; openwrt?: string; openclash?: string; nas?: string; question?: string }) =>
     req<{ ok: true; model: string; mode: string; analyzedAt: number; report: string }>("/api/ai/diagnose", {
       method: "POST",
       body: JSON.stringify(payload),

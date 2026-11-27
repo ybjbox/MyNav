@@ -236,7 +236,7 @@ export async function ingest(req: Request, env: Env): Promise<Response> {
     services?: { name: string; status?: string; latency_ms?: number; fails?: number }[];
     alerts?: { id: string; device: string; rule: string; severity: string; message: string; first_seen: number; last_seen: number }[];
     resolved_alert_ids?: string[];
-    logs?: { openwrt?: unknown; openclash?: unknown };
+    logs?: { openwrt?: unknown; openclash?: unknown; nas?: unknown };
   };
   try {
     const rawText = await req.text();

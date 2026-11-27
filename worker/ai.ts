@@ -2,10 +2,18 @@
 import { Env, err, json, rateLimited, requireAdmin } from "./_shared";
 
 const KV_LOGS_KEY = "logs:latest";
-const KV_MODELS_KEY = "ai:models:cache";
+const KV_MODELS_KEY = "ai:models:cache:v2";
 const MODEL_ID_RE = /^@(?:cf|hf)\/[a-zA-Z0-9._\-\/]{3,120}$/;
-const MODEL_PRIMARY = "@cf/qwen/qwen3-30b-a3b-fp8";
-const MODEL_FALLBACK = "@cf/qwen/qwen2.5-7b-instruct";
+const MODEL_PRIMARY = "@cf/qwen/qwen3.8-27b";
+const MODEL_FALLBACK = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
+// 已下线或失效的旧默认模型 ID 自动映射到当前可用模型，避免 KV 旧配置继续触发 5007
+const RETIRED_MODEL_MAP: Record<string, string> = {
+  "@cf/qwen/qwen3-30b-a3b-fp8": MODEL_PRIMARY,
+  "@cf/qwen/qwen2.5-7b-instruct": MODEL_FALLBACK,
+  "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": MODEL_PRIMARY,
+  "@cf/google/gemma-3-12b-it": "@cf/google/gemma-4-26b-a4b-it",
+};
 
 export interface AiModelOption {
   id: string;
@@ -14,12 +22,12 @@ export interface AiModelOption {
 }
 
 const BUILTIN_MODELS: AiModelOption[] = [
-  { id: "@cf/qwen/qwen3-30b-a3b-fp8", name: "Qwen3 30B MoE（推荐·中文强）", description: "稀疏激活 30B，中文与网络排错能力强且省额度" },
-  { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", name: "Llama 3.3 70B（旗舰通用）", description: "70B 旗舰指令模型，综合推理稳健" },
-  { id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b", name: "DeepSeek R1 32B（深度推理）", description: "适合复杂网络链路与多日志交叉排错" },
-  { id: "@cf/google/gemma-3-12b-it", name: "Gemma 3 12B（均衡）", description: "Google 轻量高效指令模型" },
+  { id: "@cf/qwen/qwen3.8-27b", name: "Qwen 3.8 27B（推荐·中文强）", description: "千问 3.8 27B 指令模型，中文与网络排错能力强" },
+  { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", name: "Llama 3.3 70B（旗舰通用·快）", description: "70B FP8 旗舰模型，推理稳定且响应快" },
+  { id: "@cf/zai-org/glm-4.7-flash", name: "GLM 4.7 Flash（中文轻量）", description: "智谱轻量多语言文本模型，适合日常巡检" },
+  { id: "@cf/google/gemma-4-26b-a4b-it", name: "Gemma 4 26B（Google）", description: "Google Gemma 4 指令模型，长上下文表现佳" },
   { id: "@cf/mistralai/mistral-small-3.1-24b-instruct", name: "Mistral Small 3.1 24B", description: "长上下文结构化分析能力强" },
-  { id: "@cf/qwen/qwen2.5-7b-instruct", name: "Qwen 2.5 7B（轻量省额度）", description: "低 Neuron 消耗，适合高频日常巡检" },
+  { id: "@cf/qwen/qwen2.5-coder-32b-instruct", name: "Qwen 2.5 Coder 32B（排错）", description: "擅长日志、配置与脚本问题排查" },
 ];
 
 export async function getAiModels(req: Request, env: Env): Promise<Response> {
@@ -57,7 +65,7 @@ export async function getAiModels(req: Request, env: Env): Promise<Response> {
             }))
             .sort((a, b) => {
               const score = (id: string) =>
-                /qwen3|llama-3\.3|deepseek-r1/i.test(id) ? 0 : /qwen|llama-3\.1|gemma-3|mistral/i.test(id) ? 1 : 2;
+                /qwen3\.8|llama-3\.3|glm-4\.7/i.test(id) ? 0 : /qwen|gemma-4|mistral|llama-4/i.test(id) ? 1 : 2;
               return score(a.id) - score(b.id) || a.id.localeCompare(b.id);
             });
           if (onlineModels.length > 0) {
@@ -81,6 +89,7 @@ export interface StoredIngestLogs {
   source: string;
   openwrt: string[];
   openclash: string[];
+  nas?: string[];
 }
 
 /** 对日志中的敏感凭据与订阅链接做自动脱敏 */
@@ -101,23 +110,25 @@ function cleanLogLines(input: unknown, maxLines = 100): string[] {
     .filter(Boolean);
 }
 
-/** 供 /api/ingest 调用：可选保存采集器上报的 OpenWrt / OpenClash 脱敏日志 */
+/** 供 /api/ingest 调用：可选保存采集器上报的 OpenWrt / OpenClash / NAS 脱敏日志 */
 export async function saveIngestedLogs(
   env: Env,
   source: string,
   updatedAtMs: number,
-  logs?: { openwrt?: unknown; openclash?: unknown },
+  logs?: { openwrt?: unknown; openclash?: unknown; nas?: unknown },
 ): Promise<void> {
   if (!logs || typeof logs !== "object") return;
   const openwrt = cleanLogLines(logs.openwrt, 100);
   const openclash = cleanLogLines(logs.openclash, 100);
-  if (openwrt.length === 0 && openclash.length === 0) return;
+  const nas = cleanLogLines(logs.nas, 100);
+  if (openwrt.length === 0 && openclash.length === 0 && nas.length === 0) return;
 
   const payload: StoredIngestLogs = {
     updated_at: updatedAtMs,
     source,
     openwrt,
     openclash,
+    ...(nas.length > 0 ? { nas } : {}),
   };
   await env.KV.put(KV_LOGS_KEY, JSON.stringify(payload), { expirationTtl: 7 * 86400 });
 }
@@ -125,11 +136,36 @@ export async function saveIngestedLogs(
 export async function getAiLogs(req: Request, env: Env): Promise<Response> {
   const { authed } = await requireAdmin(req, env);
   if (!authed) return err(401, "未登录");
+  const detail = new URL(req.url).searchParams.get("detail") === "1";
   const stored = await env.KV.get<StoredIngestLogs>(KV_LOGS_KEY, "json");
+  const meta = stored
+    ? {
+        updated_at: stored.updated_at,
+        source: stored.source,
+        counts: {
+          openwrt: stored.openwrt?.length ?? 0,
+          openclash: stored.openclash?.length ?? 0,
+          nas: stored.nas?.length ?? 0,
+        },
+      }
+    : null;
   return json({
     available: !!stored,
     aiBound: !!env.AI,
-    logs: stored || null,
+    meta,
+    ...(detail
+      ? {
+          logs: stored
+            ? {
+                updated_at: stored.updated_at,
+                source: stored.source,
+                openwrt: stored.openwrt || [],
+                openclash: stored.openclash || [],
+                nas: stored.nas || [],
+              }
+            : null,
+        }
+      : {}),
   });
 }
 
@@ -163,12 +199,72 @@ async function readDeviceSummary(env: Env): Promise<string> {
 
 function extractAiText(res: unknown): string {
   if (!res || typeof res !== "object") return String(res || "");
-  const r = res as { response?: string; choices?: { message?: { content?: string } }[] };
-  if (typeof r.response === "string") return r.response.trim();
-  if (Array.isArray(r.choices) && r.choices[0]?.message?.content) {
-    return String(r.choices[0].message.content).trim();
+  const r = res as {
+    response?: string;
+    choices?: { message?: { content?: string | null; reasoning_content?: string | null; reasoning?: string | null } }[];
+  };
+  if (Array.isArray(r.choices) && r.choices[0]?.message) {
+    const msg = r.choices[0].message;
+    if (typeof msg.content === "string" && msg.content.trim()) return msg.content.trim();
+    if (typeof r.response === "string" && r.response.trim()) return r.response.trim();
+    if (typeof msg.reasoning_content === "string" && msg.reasoning_content.trim()) return msg.reasoning_content.trim();
+    if (typeof msg.reasoning === "string" && msg.reasoning.trim()) return msg.reasoning.trim();
   }
+  if (typeof r.response === "string") return r.response.trim();
   return JSON.stringify(res);
+}
+
+/** 提取消息指纹（去掉前导时间），用于把高频重复日志折叠为 `×N`，避免淹没关键报错 */
+function logFingerprint(line: string): string {
+  return line
+    .replace(/^[A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d+\s+\d+:\d+:\d+\s+\d{4}\s+/, "")
+    .replace(/^(?:time="[^"]+"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)\s+/, "");
+}
+
+/** 去重高频刷屏日志并保留最新尾部 maxChars 字符 */
+function compressLogsForAi(lines: string[], maxChars: number): string {
+  if (lines.length === 0) return "";
+  const order: string[] = [];
+  const counts = new Map<string, number>();
+  const latestLine = new Map<string, string>();
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    const fp = logFingerprint(line);
+    if (!counts.has(fp)) {
+      order.push(fp);
+      counts.set(fp, 1);
+    } else {
+      counts.set(fp, (counts.get(fp) || 0) + 1);
+    }
+    latestLine.set(fp, line);
+  }
+  const merged = order.map((fp) => {
+    const n = counts.get(fp) || 1;
+    const l = latestLine.get(fp) || "";
+    return n > 1 ? `${l} (近期重复 ×${n})` : l;
+  });
+  // 从最新行倒推选取，确保最近日志优先进入上下文
+  const picked: string[] = [];
+  let total = 0;
+  for (let i = merged.length - 1; i >= 0; i--) {
+    const line = merged[i];
+    const add = line.length + (picked.length > 0 ? 1 : 0);
+    if (total + add > maxChars && picked.length > 0) break;
+    picked.push(line);
+    total += add;
+  }
+  picked.reverse();
+  const out = picked.join("\n");
+  return out.length > maxChars ? out.slice(-maxChars) : out;
+}
+
+function splitManualLogs(raw?: string): string[] {
+  return String(raw || "")
+    .split(/\r?\n/)
+    .slice(-120)
+    .map(sanitizeLogLine)
+    .filter(Boolean);
 }
 
 export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
@@ -177,7 +273,7 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
   if (await rateLimited(env, req, "rl:ai", 20)) return err(429, "AI 诊断请求过于频繁，请稍后再试");
   if (!env.AI) return err(503, "Workers AI 未绑定（请检查 wrangler.toml [ai] 配置）");
 
-  let body: { mode?: string; model?: string; openwrt?: string; openclash?: string; question?: string };
+  let body: { mode?: string; model?: string; openwrt?: string; openclash?: string; nas?: string; question?: string };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -185,53 +281,55 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
   }
 
   const mode = body.mode === "manual" ? "manual" : "auto";
-  const requestedModel = body.model && MODEL_ID_RE.test(body.model.trim()) ? body.model.trim() : MODEL_PRIMARY;
+  const rawModel = body.model && MODEL_ID_RE.test(body.model.trim()) ? body.model.trim() : MODEL_PRIMARY;
+  const requestedModel = RETIRED_MODEL_MAP[rawModel] || rawModel;
   const question = sanitizeLogLine(body.question || "").slice(0, 200);
-  let openwrtText = "";
-  let openclashText = "";
+  let openwrtLines: string[] = [];
+  let openclashLines: string[] = [];
+  let nasLines: string[] = [];
 
   if (mode === "manual") {
-    openwrtText = String(body.openwrt || "")
-      .split(/\r?\n/)
-      .slice(-120)
-      .map(sanitizeLogLine)
-      .filter(Boolean)
-      .join("\n");
-    openclashText = String(body.openclash || "")
-      .split(/\r?\n/)
-      .slice(-120)
-      .map(sanitizeLogLine)
-      .filter(Boolean)
-      .join("\n");
+    openwrtLines = splitManualLogs(body.openwrt);
+    openclashLines = splitManualLogs(body.openclash);
+    nasLines = splitManualLogs(body.nas);
   } else {
     const stored = await env.KV.get<StoredIngestLogs>(KV_LOGS_KEY, "json");
     if (stored) {
-      openwrtText = (stored.openwrt || []).slice(-100).join("\n");
-      openclashText = (stored.openclash || []).slice(-100).join("\n");
+      openwrtLines = (stored.openwrt || []).slice(-100);
+      openclashLines = (stored.openclash || []).slice(-100);
+      nasLines = (stored.nas || []).slice(-100);
     }
   }
 
+  const openwrtText = compressLogsForAi(openwrtLines, 3500);
+  const openclashText = compressLogsForAi(openclashLines, 3500);
+  const nasText = compressLogsForAi(nasLines, 3000);
+
   const deviceSummary = await readDeviceSummary(env);
-  if (!openwrtText && !openclashText && !deviceSummary) {
+  if (!openwrtText && !openclashText && !nasText && !deviceSummary) {
     return err(400, "暂无可供分析的日志或监控数据，请先粘贴日志或等待采集器上报");
   }
 
   const sections: string[] = [];
   if (deviceSummary) sections.push(`【当前设备监控与告警摘要】\n${deviceSummary}`);
-  if (openwrtText) sections.push(`【OpenWrt 系统日志】\n${openwrtText.slice(0, 4000)}`);
-  if (openclashText) sections.push(`【OpenClash 日志】\n${openclashText.slice(0, 4000)}`);
+  if (openwrtText) sections.push(`【OpenWrt 路由器系统日志（已去重折叠）】\n${openwrtText}`);
+  if (openclashText) sections.push(`【OpenClash 日志（已去重折叠）】\n${openclashText}`);
+  if (nasText) sections.push(`【飞牛 NAS 系统日志（已去重折叠）】\n${nasText}`);
   if (question) sections.push(`【用户补充问题】\n${question}`);
 
   const messages = [
     {
       role: "system",
       content:
-        "你是一位精通 OpenWrt (FanchmWrt)、Linux 网络栈与 OpenClash (Mihomo/Clash Meta) 的资深网络运维工程师。" +
-        "请根据提供的设备监控指标、OpenWrt 日志与 OpenClash 日志，用简体中文输出清晰、可落地的诊断报告，包含：\n" +
-        "1. **整体健康与核心结论**（1-2 句话直击问题或确认正常）\n" +
-        "2. **异常点与根因分析**（逐条列出发现的报错、DNS/Fake-IP/TUN/拨号/节点超时/内存或连接数异常）\n" +
-        "3. **具体排查与修复建议**（给出明确的 LuCI 菜单或 OpenClash 配置操作步骤）\n" +
-        "注意：不要编造日志中不存在的报错；若日志不足以定位，明确指出还需补充哪类日志。",
+        "你是一位精通 OpenWrt (FanchmWrt)、Linux/Debian NAS、网络栈与 OpenClash (Mihomo/Clash Meta) 的资深运维工程师。" +
+        "请根据提供的设备监控指标、OpenWrt 路由器系统日志、OpenClash 日志与飞牛 NAS 日志，用简体中文输出结构化诊断报告。\n" +
+        "必须严格按以下分项结构输出，不能因某一端报错较多而跳过路由器系统本身的分析：\n" +
+        "1. **整体健康与核心结论**（1-2 句话直击整体状态）\n" +
+        "2. **路由器系统（OpenWrt / FanchmWrt）分析**（独立分析内核、网口/驱动、fwxd/uwsgi/DHCP 等系统日志及负载、连接数，即使正常也要明确说明健康情况与需关注的微弱警告）\n" +
+        "3. **OpenClash 代理与链路分析**（分析内核状态、节点断连/超时、DNS/Fake-IP/TUN 等）\n" +
+        "4. **飞牛 NAS 状态与日志分析**（结合 NAS 指标与系统日志分析磁盘、温控、服务异常；若未开启 NAS 日志采集则基于指标分析并提示可开启独立日志开关）\n" +
+        "5. **具体排查与修复建议**（给出可执行的具体 LuCI、OpenClash 或 NAS 操作步骤）\n" +
+        "注意：严格依据实际日志与数据作答，不要编造不存在的报错。",
     },
     {
       role: "user",
@@ -242,12 +340,12 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
   let usedModel = requestedModel;
   let resultText = "";
   try {
-    const out = await env.AI.run(requestedModel, { messages, max_tokens: 1024, temperature: 0.3 });
+    const out = await env.AI.run(requestedModel, { messages, max_tokens: 1800, temperature: 0.3 });
     resultText = extractAiText(out);
   } catch (e1) {
     try {
       usedModel = MODEL_FALLBACK;
-      const out2 = await env.AI.run(MODEL_FALLBACK, { messages, max_tokens: 1024, temperature: 0.3 });
+      const out2 = await env.AI.run(MODEL_FALLBACK, { messages, max_tokens: 1800, temperature: 0.3 });
       resultText = extractAiText(out2);
     } catch (e2) {
       const msg = (e2 as Error).message || (e1 as Error).message || "Workers AI 调用失败";

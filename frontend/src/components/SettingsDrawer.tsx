@@ -874,14 +874,22 @@ export function SettingsDrawer(props: {
                       <Select
                         showSearch
                         optionFilterProp="label"
-                        value={draft.monitor.aiModel || "@cf/qwen/qwen3-30b-a3b-fp8"}
+                        value={
+                          ({
+                            "@cf/qwen/qwen3-30b-a3b-fp8": "@cf/qwen/qwen3.8-27b",
+                            "@cf/qwen/qwen2.5-7b-instruct": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                            "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b": "@cf/qwen/qwen3.8-27b",
+                            "@cf/google/gemma-3-12b-it": "@cf/google/gemma-4-26b-a4b-it",
+                          }[draft.monitor.aiModel || ""] || draft.monitor.aiModel || "@cf/qwen/qwen3.8-27b")
+                        }
                         style={{ minWidth: 260, maxWidth: 320 }}
                         options={(aiModels.length > 0
                           ? aiModels
                           : [
-                              { id: "@cf/qwen/qwen3-30b-a3b-fp8", name: "Qwen3 30B MoE（推荐·中文强）" },
-                              { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", name: "Llama 3.3 70B（旗舰通用）" },
-                              { id: "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b", name: "DeepSeek R1 32B（深度推理）" },
+                              { id: "@cf/qwen/qwen3.8-27b", name: "Qwen 3.8 27B（推荐·中文强）" },
+                              { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", name: "Llama 3.3 70B（旗舰通用·快）" },
+                              { id: "@cf/zai-org/glm-4.7-flash", name: "GLM 4.7 Flash（中文轻量）" },
+                              { id: "@cf/google/gemma-4-26b-a4b-it", name: "Gemma 4 26B（Google）" },
                             ]
                         ).map((m) => ({ label: m.name || m.id, value: m.id }))}
                         onChange={(v) => setDraft((d) => ({ ...d, monitor: { ...d.monitor, aiModel: v } }))}
