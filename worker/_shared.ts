@@ -4,8 +4,6 @@ export interface Env {
   KV: KVNamespace;
   AI?: { run: (model: string, input: Record<string, unknown>) => Promise<unknown> };
   JWT_SECRET: string;
-  // 过渡期可选兼容旧静态采集器令牌（逐步废弃，推荐改用账号密码登录 /api/collector/login）
-  COLLECTOR_TOKEN?: string;
   // 初始管理员账号凭据（D1 users 表为空时用于首次登录引导与自动落库）
   USERNAME?: string;
   PASSWORD?: string;
@@ -150,19 +148,15 @@ function constTimeEqStr(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** 采集器鉴权：优先校验 /api/collector/login 签发的 collector JWT；过渡期可选兼容静态 COLLECTOR_TOKEN */
+/** 采集器鉴权：校验 /api/collector/login 签发的 collector JWT */
 export async function requireCollector(req: Request, env: Env): Promise<boolean> {
   const auth = req.headers.get("authorization") || "";
   const m = auth.match(/^Bearer\s+(.+)$/i);
   if (!m) return false;
   const tok = m[1].trim();
-  if (!tok) return false;
-  if (tok.includes(".")) {
-    const res = await verifyJwt(env, tok, "collector");
-    if (res.authed) return true;
-  }
-  const legacy = env.COLLECTOR_TOKEN?.trim() || "";
-  return legacy.length >= 16 && constTimeEqStr(tok, legacy);
+  if (!tok || !tok.includes(".")) return false;
+  const res = await verifyJwt(env, tok, "collector");
+  return res.authed;
 }
 
 /* ---------- 密码（PBKDF2-SHA256） ---------- */
