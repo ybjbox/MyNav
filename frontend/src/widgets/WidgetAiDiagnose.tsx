@@ -142,7 +142,7 @@ export function WidgetAiDiagnose(_props: WidgetProps) {
           ) : (
             <div className="wai-hint" style={{ flex: 1, display: "flex", alignItems: "center", fontSize: 12, color: "#64748b" }}>
               {logMeta?.meta
-                ? `最近日志上报于 ${new Date(logMeta.meta.updated_at).toLocaleTimeString()}，点击下方即可自动排错`
+                ? `近 24h 日志已同步（更新 ${new Date(logMeta.meta.updated_at).toLocaleTimeString()}），点击下方自动排错`
                 : "可直接结合设备监控快照分析，或点「详情」手动粘贴日志"}
             </div>
           )}

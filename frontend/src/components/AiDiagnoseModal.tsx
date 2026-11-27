@@ -20,18 +20,25 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
   const [meta, setMeta] = useState<{
     available: boolean;
     aiBound: boolean;
-    meta: { updated_at: number; source: string; counts: { openwrt: number; openclash: number; nas: number } } | null;
+    meta: {
+      updated_at: number;
+      oldest_at?: number;
+      retentionHours?: number;
+      retentionDays?: number;
+      source: string;
+      counts: { openwrt: number; openclash: number; nas: number };
+      counts7d?: { openwrt: number; openclash: number; nas: number };
+    } | null;
   } | null>(null);
   const [logsOpen, setLogsOpen] = useState(false);
   const [logsBusy, setLogsBusy] = useState(false);
+  const [onlyWarnLogs, setOnlyWarnLogs] = useState(false);
+  const [logDays, setLogDays] = useState<1 | 3 | 7>(1);
   const [logTab, setLogTab] = useState<"openwrt" | "openclash" | "nas">("openwrt");
-  const [logDetail, setLogDetail] = useState<{
-    updated_at: number;
-    source: string;
-    openwrt: string[];
-    openclash: string[];
-    nas?: string[];
-  } | null>(null);
+  const [logCache, setLogCache] = useState<{
+    updatedAt: number;
+    byKey: Record<string, string[]>;
+  }>({ updatedAt: 0, byKey: {} });
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<{
     text: string;
@@ -76,13 +83,32 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
     }
   };
 
-  const fetchLogsDetail = async (force = false) => {
-    if (!force && logDetail && meta?.meta && logDetail.updated_at === meta.meta.updated_at) return;
+  const logCacheKey = (kind: "openwrt" | "openclash" | "nas", days: 1 | 3 | 7, onlyWarn: boolean) =>
+    `${kind}:${days}:${onlyWarn ? "w" : "a"}`;
+
+  const fetchLogsDetail = async (
+    kind: "openwrt" | "openclash" | "nas",
+    days: 1 | 3 | 7,
+    onlyWarn: boolean,
+    force = false,
+  ) => {
+    const key = logCacheKey(kind, days, onlyWarn);
+    if (!force && meta?.meta && logCache.updatedAt === meta.meta.updated_at && logCache.byKey[key]) return;
     setLogsBusy(true);
     try {
-      const res = await api.aiLogs(true);
+      const res = await api.aiLogs({ detail: true, kind, days, onlyWarn, limit: 600 });
       setMeta({ available: res.available, aiBound: res.aiBound, meta: res.meta });
-      setLogDetail(res.logs ?? null);
+      const lines =
+        kind === "openwrt"
+          ? (res.logs?.openwrt ?? [])
+          : kind === "openclash"
+            ? (res.logs?.openclash ?? [])
+            : (res.logs?.nas ?? []);
+      setLogCache((prev) => {
+        const nextUpdated = res.meta?.updated_at ?? prev.updatedAt;
+        const base = prev.updatedAt === nextUpdated ? prev.byKey : {};
+        return { updatedAt: nextUpdated, byKey: { ...base, [key]: lines } };
+      });
     } catch (e) {
       toast((e as Error).message, true);
     } finally {
@@ -93,7 +119,23 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
   const toggleLogsViewer = () => {
     const next = !logsOpen;
     setLogsOpen(next);
-    if (next) void fetchLogsDetail(false);
+    if (next) void fetchLogsDetail(logTab, logDays, onlyWarnLogs, false);
+  };
+
+  const switchLogTab = (nextTab: "openwrt" | "openclash" | "nas") => {
+    setLogTab(nextTab);
+    if (logsOpen) void fetchLogsDetail(nextTab, logDays, onlyWarnLogs, false);
+  };
+
+  const switchLogDays = (nextDays: 1 | 3 | 7) => {
+    setLogDays(nextDays);
+    if (logsOpen) void fetchLogsDetail(logTab, nextDays, onlyWarnLogs, false);
+  };
+
+  const toggleWarnFilter = () => {
+    const nextWarn = !onlyWarnLogs;
+    setOnlyWarnLogs(nextWarn);
+    if (logsOpen) void fetchLogsDetail(logTab, logDays, nextWarn, false);
   };
 
   const run = async () => {
@@ -127,13 +169,13 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
   };
 
   const counts = meta?.meta?.counts;
-  const hasAutoLogs = !!(counts && (counts.openwrt > 0 || counts.openclash > 0 || counts.nas > 0));
-  const activeLogLines =
-    logTab === "openwrt"
-      ? (logDetail?.openwrt ?? [])
-      : logTab === "openclash"
-        ? (logDetail?.openclash ?? [])
-        : (logDetail?.nas ?? []);
+  const counts7d = meta?.meta?.counts7d;
+  const hasAutoLogs = !!(
+    (counts && (counts.openwrt > 0 || counts.openclash > 0 || counts.nas > 0)) ||
+    (counts7d && (counts7d.openwrt > 0 || counts7d.openclash > 0 || counts7d.nas > 0))
+  );
+  const activeKey = logCacheKey(logTab, logDays, onlyWarnLogs);
+  const activeLogLines = logCache.byKey[activeKey];
 
   return (
     <div
@@ -209,10 +251,15 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                       <div style={{ fontWeight: 600, color: "#0f172a" }}>
-                        已就绪：最近上报于 {new Date(meta.meta.updated_at).toLocaleString()}（来源：{meta.meta.source}）
+                        已就绪（云端留存 {meta.meta.retentionDays || 7} 天 · AI 默认分析近 24h）：
+                        {meta.meta.oldest_at ? `${new Date(meta.meta.oldest_at).toLocaleString()} → ` : ""}
+                        {new Date(meta.meta.updated_at).toLocaleString()}（来源：{meta.meta.source}）
                       </div>
                       <div>
-                        OpenWrt {meta.meta.counts.openwrt} 行 · OpenClash {meta.meta.counts.openclash} 行 · NAS {meta.meta.counts.nas} 行（已脱敏）
+                        近 24h：OpenWrt {meta.meta.counts.openwrt} 行 · OpenClash {meta.meta.counts.openclash} 行 · NAS {meta.meta.counts.nas} 行
+                        {meta.meta.counts7d
+                          ? `（7 天累计：${meta.meta.counts7d.openwrt} / ${meta.meta.counts7d.openclash} / ${meta.meta.counts7d.nas}）`
+                          : ""}
                       </div>
                     </div>
                     <Button size="small" onClick={toggleLogsViewer}>
@@ -225,21 +272,40 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
                         <Segmented
                           size="small"
                           value={logTab}
-                          onChange={(v) => setLogTab(v as "openwrt" | "openclash" | "nas")}
+                          onChange={(v) => switchLogTab(v as "openwrt" | "openclash" | "nas")}
                           options={[
                             { label: `OpenWrt (${meta.meta.counts.openwrt})`, value: "openwrt" },
                             { label: `OpenClash (${meta.meta.counts.openclash})`, value: "openclash" },
                             { label: `NAS (${meta.meta.counts.nas})`, value: "nas" },
                           ]}
                         />
-                        <Button size="small" loading={logsBusy} onClick={() => void fetchLogsDetail(true)}>
-                          刷新
-                        </Button>
+                        <Segmented
+                          size="small"
+                          value={logDays}
+                          onChange={(v) => switchLogDays(v as 1 | 3 | 7)}
+                          options={[
+                            { label: "近 1 天", value: 1 },
+                            { label: "近 3 天", value: 3 },
+                            { label: "近 7 天", value: 7 },
+                          ]}
+                        />
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <Button
+                            size="small"
+                            type={onlyWarnLogs ? "primary" : "default"}
+                            onClick={toggleWarnFilter}
+                          >
+                            {onlyWarnLogs ? "只看异常中" : "过滤异常"}
+                          </Button>
+                          <Button size="small" loading={logsBusy} onClick={() => void fetchLogsDetail(logTab, logDays, onlyWarnLogs, true)}>
+                            刷新
+                          </Button>
+                        </div>
                       </div>
                       <pre
                         style={{
                           margin: 0,
-                          maxHeight: 210,
+                          maxHeight: 220,
                           overflow: "auto",
                           padding: "8px 10px",
                           borderRadius: 8,
@@ -252,13 +318,15 @@ export function AiDiagnoseModal(props: { open: boolean; onClose: () => void }) {
                           fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
                         }}
                       >
-                        {logsBusy && !logDetail
-                          ? "按需加载日志中…"
-                          : activeLogLines.length > 0
+                        {logsBusy && !activeLogLines
+                          ? "按需加载该时段日志中…"
+                          : activeLogLines && activeLogLines.length > 0
                             ? activeLogLines.join("\n")
-                            : logTab === "nas"
-                              ? "暂无 NAS 日志（如需采集请在路由器 LuCI → NAV 采集器 → 飞牛 NAS 开启「采集 NAS 系统日志」）"
-                              : "暂无该类日志"}
+                            : onlyWarnLogs
+                              ? `近 ${logDays} 天内未匹配到 warn/err/timeout 等异常日志`
+                              : logTab === "nas"
+                                ? "暂无 NAS 日志（如需采集请在路由器 LuCI → NAV 采集器 → 飞牛 NAS 开启「采集 NAS 系统日志」）"
+                                : `近 ${logDays} 天暂无该类日志`}
                       </pre>
                     </div>
                   )}

@@ -100,9 +100,11 @@ async function notify(sa: StaleAlertConfig, title: string, body: string, source:
 /* ---------- 每日清理：31 天前的采样与已恢复告警 ---------- */
 async function dailyCleanup(env: Env): Promise<void> {
   const cutoff = Math.floor(Date.now() / 1000) - 31 * 86400;
+  const logCutoff = Math.floor(Date.now() / 1000) - (7 * 24 + 2) * 3600;
   try {
     await env.DB.exec(`DELETE FROM samples WHERE ts < ${cutoff}`);
     await env.DB.exec(`DELETE FROM alerts WHERE resolved_at IS NOT NULL AND resolved_at < ${cutoff}`);
+    await env.DB.exec(`DELETE FROM logs_hourly WHERE bucket_ts < ${logCutoff}`);
   } catch (e) {
     console.error("daily-cleanup 失败", e);
   }

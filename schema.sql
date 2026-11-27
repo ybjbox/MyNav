@@ -35,3 +35,15 @@ CREATE TABLE IF NOT EXISTS alerts (
   resolved_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_last_seen ON alerts (last_seen);
+
+-- 7 天滚动日志按小时分桶（避免每分钟写 KV 耗尽免费额度，同时防止 OpenClash 轮转覆盖丢日志）
+CREATE TABLE IF NOT EXISTS logs_hourly (
+  bucket_ts INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  source TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  line_count INTEGER NOT NULL,
+  lines_json TEXT NOT NULL,
+  PRIMARY KEY (bucket_ts, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_logs_hourly_updated ON logs_hourly (updated_at);

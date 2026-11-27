@@ -179,7 +179,8 @@ export async function getAiUsage(req: Request, env: Env): Promise<Response> {
   const accId = env.CF_ACCOUNT_ID?.trim();
   const apiToken = env.CF_API_TOKEN?.trim();
   if (!accId || !apiToken) {
-    return json({ available: false, reason: "未配置 CF_ACCOUNT_ID 或 CF_API_TOKEN" } satisfies AiUsageResp);
+    const missing = [!accId ? "CF_ACCOUNT_ID" : "", !apiToken ? "CF_API_TOKEN" : ""].filter(Boolean).join("、");
+    return json({ available: false, reason: `Worker 运行时未配置 ${missing}` } satisfies AiUsageResp);
   }
 
   const refresh = new URL(req.url).searchParams.get("refresh") === "1";
@@ -287,12 +288,33 @@ export async function getAiUsage(req: Request, env: Env): Promise<Response> {
   }
 }
 
+export type LogKind = "openwrt" | "openclash" | "nas";
+
 export interface StoredIngestLogs {
   updated_at: number;
+  oldest_at?: number;
+  retentionHours?: number;
+  retentionDays?: number;
+  days?: number;
   source: string;
   openwrt: string[];
   openclash: string[];
   nas?: string[];
+}
+
+const LOG_RETENTION_DAYS = 7;
+const LOG_RETENTION_HOURS = LOG_RETENTION_DAYS * 24;
+const MAX_LINES_PER_HOUR = 1000;
+const LOG_KINDS: LogKind[] = ["openwrt", "openclash", "nas"];
+const WARN_LINE_RE = /err|warn|crit|fatal|panic|oom|fail|timeout|deadline|closed|eof|refused|reset|tx error|watchdog|down/i;
+let logTableReady = false;
+
+async function ensureLogTable(env: Env): Promise<void> {
+  if (logTableReady) return;
+  await env.DB.exec(
+    "CREATE TABLE IF NOT EXISTS logs_hourly (bucket_ts INTEGER NOT NULL, kind TEXT NOT NULL, source TEXT NOT NULL, updated_at INTEGER NOT NULL, line_count INTEGER NOT NULL, lines_json TEXT NOT NULL, PRIMARY KEY (bucket_ts, kind)); CREATE INDEX IF NOT EXISTS idx_logs_hourly_updated ON logs_hourly (updated_at);",
+  );
+  logTableReady = true;
 }
 
 /** 对日志中的敏感凭据与订阅链接做自动脱敏 */
@@ -305,7 +327,7 @@ export function sanitizeLogLine(line: string): string {
     .replace(/(https?:\/\/[^\s"'<>]+?\?(?:[^\s"'<>]*?(?:token|key|auth|sub|password)=)[^\s"'<>]+)/gi, "[已脱敏URL]");
 }
 
-function cleanLogLines(input: unknown, maxLines = 100): string[] {
+function cleanLogLines(input: unknown, maxLines = 200): string[] {
   if (!Array.isArray(input)) return [];
   return input
     .slice(-maxLines)
@@ -313,7 +335,7 @@ function cleanLogLines(input: unknown, maxLines = 100): string[] {
     .filter(Boolean);
 }
 
-/** 供 /api/ingest 调用：可选保存采集器上报的 OpenWrt / OpenClash / NAS 脱敏日志 */
+/** 供 /api/ingest 调用：按小时分桶合并写入 D1 logs_hourly（保留 24 小时滚动记录且避免高频写 KV） */
 export async function saveIngestedLogs(
   env: Env,
   source: string,
@@ -321,54 +343,228 @@ export async function saveIngestedLogs(
   logs?: { openwrt?: unknown; openclash?: unknown; nas?: unknown },
 ): Promise<void> {
   if (!logs || typeof logs !== "object") return;
-  const openwrt = cleanLogLines(logs.openwrt, 100);
-  const openclash = cleanLogLines(logs.openclash, 100);
-  const nas = cleanLogLines(logs.nas, 100);
-  if (openwrt.length === 0 && openclash.length === 0 && nas.length === 0) return;
-
-  const payload: StoredIngestLogs = {
-    updated_at: updatedAtMs,
-    source,
-    openwrt,
-    openclash,
-    ...(nas.length > 0 ? { nas } : {}),
+  const incoming: Record<LogKind, string[]> = {
+    openwrt: cleanLogLines(logs.openwrt, 200),
+    openclash: cleanLogLines(logs.openclash, 200),
+    nas: cleanLogLines(logs.nas, 200),
   };
-  await env.KV.put(KV_LOGS_KEY, JSON.stringify(payload), { expirationTtl: 7 * 86400 });
+  if (incoming.openwrt.length === 0 && incoming.openclash.length === 0 && incoming.nas.length === 0) return;
+
+  await ensureLogTable(env);
+  const bucketTs = Math.floor(updatedAtMs / 1000 / 3600) * 3600;
+  const existingRows = await env.DB.prepare("SELECT kind, lines_json FROM logs_hourly WHERE bucket_ts = ?")
+    .bind(bucketTs)
+    .all<{ kind: string; lines_json: string }>();
+  const existingMap = new Map<string, string[]>();
+  for (const r of existingRows.results || []) {
+    try {
+      const parsed = JSON.parse(r.lines_json);
+      if (Array.isArray(parsed)) existingMap.set(r.kind, parsed.map(String));
+    } catch {
+      /* 忽略损坏分桶 */
+    }
+  }
+
+  const stmts: D1PreparedStatement[] = [];
+  let isNewHourBucket = existingMap.size === 0;
+  for (const kind of LOG_KINDS) {
+    const batch = incoming[kind];
+    if (batch.length === 0) continue;
+    const prev = existingMap.get(kind) || [];
+    const seen = new Set(prev);
+    let added = 0;
+    const merged = [...prev];
+    for (const line of batch) {
+      if (!seen.has(line)) {
+        seen.add(line);
+        merged.push(line);
+        added++;
+      }
+    }
+    if (added === 0 && prev.length > 0) continue;
+    const capped = merged.length > MAX_LINES_PER_HOUR ? merged.slice(-MAX_LINES_PER_HOUR) : merged;
+    stmts.push(
+      env.DB.prepare(
+        "INSERT INTO logs_hourly (bucket_ts, kind, source, updated_at, line_count, lines_json) VALUES (?, ?, ?, ?, ?, ?) " +
+          "ON CONFLICT (bucket_ts, kind) DO UPDATE SET source = excluded.source, updated_at = excluded.updated_at, line_count = excluded.line_count, lines_json = excluded.lines_json",
+      ).bind(bucketTs, kind, source, updatedAtMs, capped.length, JSON.stringify(capped)),
+    );
+  }
+  if (isNewHourBucket) {
+    // 跨入新小时分桶时顺带清理超过 7 天 + 2 小时的旧分桶
+    const cutoffTs = bucketTs - (LOG_RETENTION_HOURS + 2) * 3600;
+    stmts.push(env.DB.prepare("DELETE FROM logs_hourly WHERE bucket_ts < ?").bind(cutoffTs));
+  }
+  if (stmts.length > 0) {
+    await env.DB.batch(stmts);
+  }
+}
+
+async function readRollingMeta(env: Env): Promise<{
+  updated_at: number;
+  oldest_at?: number;
+  source: string;
+  counts: Record<LogKind, number>;
+  counts7d: Record<LogKind, number>;
+} | null> {
+  await ensureLogTable(env);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const cutoff24h = nowSec - 24 * 3600;
+  const cutoff7d = nowSec - LOG_RETENTION_HOURS * 3600;
+  const rows = await env.DB.prepare(
+    "SELECT kind, source, MIN(bucket_ts) AS min_bucket, MAX(updated_at) AS max_updated, " +
+      "SUM(CASE WHEN bucket_ts >= ? THEN line_count ELSE 0 END) AS lines_24h, " +
+      "SUM(line_count) AS lines_7d " +
+      "FROM logs_hourly WHERE bucket_ts >= ? GROUP BY kind",
+  )
+    .bind(cutoff24h, cutoff7d)
+    .all<{ kind: string; source: string; min_bucket: number; max_updated: number; lines_24h: number; lines_7d: number }>();
+  const res = rows.results || [];
+  if (res.length > 0) {
+    const counts: Record<LogKind, number> = { openwrt: 0, openclash: 0, nas: 0 };
+    const counts7d: Record<LogKind, number> = { openwrt: 0, openclash: 0, nas: 0 };
+    let updatedAt = 0;
+    let oldestSec = Number.MAX_SAFE_INTEGER;
+    let source = "router";
+    for (const r of res) {
+      if (r.kind === "openwrt" || r.kind === "openclash" || r.kind === "nas") {
+        counts[r.kind] = Number(r.lines_24h || 0);
+        counts7d[r.kind] = Number(r.lines_7d || 0);
+      }
+      if (Number(r.max_updated) > updatedAt) {
+        updatedAt = Number(r.max_updated);
+        source = r.source || source;
+      }
+      if (Number(r.min_bucket) > 0 && Number(r.min_bucket) < oldestSec) {
+        oldestSec = Number(r.min_bucket);
+      }
+    }
+    return {
+      updated_at: updatedAt || Date.now(),
+      oldest_at: oldestSec < Number.MAX_SAFE_INTEGER ? oldestSec * 1000 : undefined,
+      source,
+      counts,
+      counts7d,
+    };
+  }
+  // 兼容旧 KV 快照平滑过渡
+  const legacy = await env.KV.get<StoredIngestLogs>(KV_LOGS_KEY, "json");
+  if (!legacy) return null;
+  const legacyCounts = {
+    openwrt: legacy.openwrt?.length ?? 0,
+    openclash: legacy.openclash?.length ?? 0,
+    nas: legacy.nas?.length ?? 0,
+  };
+  return {
+    updated_at: legacy.updated_at,
+    oldest_at: legacy.updated_at,
+    source: legacy.source,
+    counts: legacyCounts,
+    counts7d: { ...legacyCounts },
+  };
+}
+
+async function readRollingLines(
+  env: Env,
+  kinds: LogKind[],
+  hours: number,
+  limitPerKind: number,
+  onlyWarn = false,
+): Promise<Record<LogKind, string[]>> {
+  await ensureLogTable(env);
+  const clampedHours = Math.max(1, Math.min(LOG_RETENTION_HOURS, Math.floor(hours)));
+  const cutoffTs = Math.floor(Date.now() / 1000) - clampedHours * 3600;
+  const placeholders = kinds.map(() => "?").join(",");
+  const rows = await env.DB.prepare(
+    `SELECT kind, lines_json FROM logs_hourly WHERE bucket_ts >= ? AND kind IN (${placeholders}) ORDER BY bucket_ts ASC`,
+  )
+    .bind(cutoffTs, ...kinds)
+    .all<{ kind: string; lines_json: string }>();
+
+  const out: Record<LogKind, string[]> = { openwrt: [], openclash: [], nas: [] };
+  for (const r of rows.results || []) {
+    if (r.kind !== "openwrt" && r.kind !== "openclash" && r.kind !== "nas") continue;
+    try {
+      const parsed = JSON.parse(r.lines_json);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          const line = String(item);
+          if (!onlyWarn || WARN_LINE_RE.test(line)) out[r.kind].push(line);
+        }
+      }
+    } catch {
+      /* 忽略 */
+    }
+  }
+  const hasAny = out.openwrt.length > 0 || out.openclash.length > 0 || out.nas.length > 0;
+  if (!hasAny && !onlyWarn) {
+    const legacy = await env.KV.get<StoredIngestLogs>(KV_LOGS_KEY, "json");
+    if (legacy) {
+      out.openwrt = legacy.openwrt || [];
+      out.openclash = legacy.openclash || [];
+      out.nas = legacy.nas || [];
+    }
+  }
+  for (const k of kinds) {
+    if (limitPerKind > 0 && out[k].length > limitPerKind) {
+      out[k] = out[k].slice(-limitPerKind);
+    }
+  }
+  return out;
 }
 
 export async function getAiLogs(req: Request, env: Env): Promise<Response> {
   const { authed } = await requireAdmin(req, env);
   if (!authed) return err(401, "未登录");
-  const detail = new URL(req.url).searchParams.get("detail") === "1";
-  const stored = await env.KV.get<StoredIngestLogs>(KV_LOGS_KEY, "json");
-  const meta = stored
+  const url = new URL(req.url);
+  const detail = url.searchParams.get("detail") === "1";
+  const onlyWarn = url.searchParams.get("onlyWarn") === "1";
+  const reqKind = url.searchParams.get("kind");
+  const daysRaw = Number(url.searchParams.get("days") || "1");
+  const days = daysRaw === 7 ? 7 : daysRaw === 3 ? 3 : 1;
+  const limitRaw = Number(url.searchParams.get("limit") || "600");
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(2000, Math.floor(limitRaw)) : 600;
+
+  const metaRaw = await readRollingMeta(env);
+  const meta = metaRaw
     ? {
-        updated_at: stored.updated_at,
-        source: stored.source,
-        counts: {
-          openwrt: stored.openwrt?.length ?? 0,
-          openclash: stored.openclash?.length ?? 0,
-          nas: stored.nas?.length ?? 0,
-        },
+        updated_at: metaRaw.updated_at,
+        oldest_at: metaRaw.oldest_at,
+        retentionHours: LOG_RETENTION_HOURS,
+        retentionDays: LOG_RETENTION_DAYS,
+        source: metaRaw.source,
+        counts: metaRaw.counts,
+        counts7d: metaRaw.counts7d,
       }
     : null;
+
+  let logs: StoredIngestLogs | null | undefined;
+  if (detail) {
+    if (!meta) {
+      logs = null;
+    } else {
+      const targetKinds: LogKind[] =
+        reqKind === "openwrt" || reqKind === "openclash" || reqKind === "nas" ? [reqKind] : LOG_KINDS;
+      const fetched = await readRollingLines(env, targetKinds, days * 24, limit, onlyWarn);
+      logs = {
+        updated_at: meta.updated_at,
+        oldest_at: meta.oldest_at,
+        retentionHours: LOG_RETENTION_HOURS,
+        retentionDays: LOG_RETENTION_DAYS,
+        days,
+        source: meta.source,
+        openwrt: fetched.openwrt,
+        openclash: fetched.openclash,
+        nas: fetched.nas,
+      };
+    }
+  }
+
   return json({
-    available: !!stored,
+    available: !!meta,
     aiBound: !!env.AI,
     meta,
-    ...(detail
-      ? {
-          logs: stored
-            ? {
-                updated_at: stored.updated_at,
-                source: stored.source,
-                openwrt: stored.openwrt || [],
-                openclash: stored.openclash || [],
-                nas: stored.nas || [],
-              }
-            : null,
-        }
-      : {}),
+    ...(detail ? { logs } : {}),
   });
 }
 
@@ -424,7 +620,7 @@ function logFingerprint(line: string): string {
     .replace(/^(?:time="[^"]+"|\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)\s+/, "");
 }
 
-/** 去重高频刷屏日志并保留最新尾部 maxChars 字符 */
+/** 去重高频刷屏日志：保留近 24h 内所有重要告警/异常与最新尾部 */
 function compressLogsForAi(lines: string[], maxChars: number): string {
   if (lines.length === 0) return "";
   const order: string[] = [];
@@ -445,19 +641,39 @@ function compressLogsForAi(lines: string[], maxChars: number): string {
   const merged = order.map((fp) => {
     const n = counts.get(fp) || 1;
     const l = latestLine.get(fp) || "";
-    return n > 1 ? `${l} (近期重复 ×${n})` : l;
+    return n > 1 ? `${l} (24h内重复 ×${n})` : l;
   });
-  // 从最新行倒推选取，确保最近日志优先进入上下文
-  const picked: string[] = [];
+  const isImportant = (s: string) =>
+    /err|warn|crit|fatal|panic|oom|fail|timeout|deadline|closed|eof|refused|reset|tx error|link|down|watchdog|restart/i.test(s);
+
+  // 先保底收入全部尾部，若 24h 唯一日志超预算则优先保留早期异常行 + 最近尾部
+  const pickedSet = new Set<number>();
   let total = 0;
+  // 第一遍：先纳入最近一半预算的最新尾部
+  const tailBudget = Math.floor(maxChars * 0.65);
   for (let i = merged.length - 1; i >= 0; i--) {
-    const line = merged[i];
-    const add = line.length + (picked.length > 0 ? 1 : 0);
-    if (total + add > maxChars && picked.length > 0) break;
-    picked.push(line);
+    const add = merged[i].length + (pickedSet.size > 0 ? 1 : 0);
+    if (total + add > tailBudget && pickedSet.size > 0) break;
+    pickedSet.add(i);
     total += add;
   }
-  picked.reverse();
+  // 第二遍：用剩余预算回溯保留更早时段里的异常/告警行
+  for (let i = merged.length - 1; i >= 0; i--) {
+    if (pickedSet.has(i) || !isImportant(merged[i])) continue;
+    const add = merged[i].length + 1;
+    if (total + add > maxChars) continue;
+    pickedSet.add(i);
+    total += add;
+  }
+  // 第三遍：若仍有空间，从新到旧补足常规日志
+  for (let i = merged.length - 1; i >= 0; i--) {
+    if (pickedSet.has(i)) continue;
+    const add = merged[i].length + 1;
+    if (total + add > maxChars) break;
+    pickedSet.add(i);
+    total += add;
+  }
+  const picked = [...pickedSet].sort((a, b) => a - b).map((idx) => merged[idx]);
   const out = picked.join("\n");
   return out.length > maxChars ? out.slice(-maxChars) : out;
 }
@@ -524,17 +740,16 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
     openclashLines = splitManualLogs(body.openclash);
     nasLines = splitManualLogs(body.nas);
   } else {
-    const stored = await env.KV.get<StoredIngestLogs>(KV_LOGS_KEY, "json");
-    if (stored) {
-      openwrtLines = (stored.openwrt || []).slice(-100);
-      openclashLines = (stored.openclash || []).slice(-100);
-      nasLines = (stored.nas || []).slice(-100);
-    }
+    // AI 默认仅优先读取并分析最近 24 小时日志，兼顾时效性与上下文预算
+    const rolling = await readRollingLines(env, LOG_KINDS, 24, 3000);
+    openwrtLines = rolling.openwrt;
+    openclashLines = rolling.openclash;
+    nasLines = rolling.nas;
   }
 
-  const openwrtText = compressLogsForAi(openwrtLines, 3500);
-  const openclashText = compressLogsForAi(openclashLines, 3500);
-  const nasText = compressLogsForAi(nasLines, 3000);
+  const openwrtText = compressLogsForAi(openwrtLines, 4200);
+  const openclashText = compressLogsForAi(openclashLines, 4200);
+  const nasText = compressLogsForAi(nasLines, 3200);
 
   const deviceSummary = await readDeviceSummary(env);
   if (!openwrtText && !openclashText && !nasText && !deviceSummary) {
@@ -543,9 +758,9 @@ export async function aiDiagnose(req: Request, env: Env): Promise<Response> {
 
   const sections: string[] = [];
   if (deviceSummary) sections.push(`【当前设备监控与告警摘要】\n${deviceSummary}`);
-  if (openwrtText) sections.push(`【OpenWrt 路由器系统日志（已去重折叠）】\n${openwrtText}`);
-  if (openclashText) sections.push(`【OpenClash 日志（已去重折叠）】\n${openclashText}`);
-  if (nasText) sections.push(`【飞牛 NAS 系统日志（已去重折叠）】\n${nasText}`);
+  if (openwrtText) sections.push(`【OpenWrt 路由器系统日志（近 24 小时共 ${openwrtLines.length} 行·已去重摘要）】\n${openwrtText}`);
+  if (openclashText) sections.push(`【OpenClash 日志（近 24 小时共 ${openclashLines.length} 行·已去重摘要）】\n${openclashText}`);
+  if (nasText) sections.push(`【飞牛 NAS 系统日志（近 24 小时共 ${nasLines.length} 行·已去重摘要）】\n${nasText}`);
   if (question) sections.push(`【用户补充问题】\n${question}`);
 
   const messages = [

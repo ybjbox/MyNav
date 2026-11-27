@@ -74,17 +74,30 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ id, listId }),
     }),
-  aiLogs: (detail = false) =>
-    req<{
+  aiLogs: (opts?: boolean | { detail?: boolean; kind?: "openwrt" | "openclash" | "nas"; days?: 1 | 3 | 7; limit?: number; onlyWarn?: boolean }) => {
+    const o = typeof opts === "boolean" ? { detail: opts } : opts || {};
+    const qs = new URLSearchParams();
+    if (o.detail) qs.set("detail", "1");
+    if (o.kind) qs.set("kind", o.kind);
+    if (o.days) qs.set("days", String(o.days));
+    if (o.limit) qs.set("limit", String(o.limit));
+    if (o.onlyWarn) qs.set("onlyWarn", "1");
+    const q = qs.toString();
+    return req<{
       available: boolean;
       aiBound: boolean;
       meta: {
         updated_at: number;
+        oldest_at?: number;
+        retentionHours?: number;
+        retentionDays?: number;
         source: string;
         counts: { openwrt: number; openclash: number; nas: number };
+        counts7d?: { openwrt: number; openclash: number; nas: number };
       } | null;
-      logs?: { updated_at: number; source: string; openwrt: string[]; openclash: string[]; nas?: string[] } | null;
-    }>(`/api/ai/logs${detail ? "?detail=1" : ""}`),
+      logs?: { updated_at: number; oldest_at?: number; retentionHours?: number; retentionDays?: number; days?: number; source: string; openwrt: string[]; openclash: string[]; nas?: string[] } | null;
+    }>(`/api/ai/logs${q ? `?${q}` : ""}`);
+  },
   aiModels: (refresh = false) =>
     req<{
       models: {
