@@ -2,9 +2,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Input, InputNumber, Segmented, Select, Switch } from "antd";
 import { IconX, IconTrash, IconUpload, IconPlus, IconSliders, IconSearch, DynIcon, iconKeys } from "./icons";
+import { api } from "../api/client";
 import { newId } from "../lib/defaultConfig";
 import { ICON_LIB_CATEGORIES, ICON_LIB_EVENT, loadIconLibrary, type IconLibraryCategory, type IconLibraryEntry } from "../lib/iconLibrary";
-import { faviconUrlForSite } from "../lib/brandCatalog";
 import { IconBlock } from "./IconBlock";
 import { IconLibraryModal } from "./IconLibraryModal";
 import { useStore } from "../state/store";
@@ -42,6 +42,7 @@ export function EditServiceModal(props: {
   const [brandCat, setBrandCat] = useState<"全部" | IconLibraryCategory>("全部");
   const [libEntries, setLibEntries] = useState<IconLibraryEntry[]>(() => loadIconLibrary());
   const [showLibModal, setShowLibModal] = useState(false);
+  const [fetchingFavicon, setFetchingFavicon] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -203,9 +204,10 @@ export function EditServiceModal(props: {
                   if (brandCat !== "全部" && b.category !== brandCat) return false;
                   const q = brandQuery.trim().toLowerCase();
                   if (!q) return true;
-                  return b.name.toLowerCase().includes(q) || b.icon.toLowerCase().includes(q);
+                  return b.name.toLowerCase().includes(q) || b.slug.toLowerCase().includes(q) || b.source.toLowerCase().includes(q);
                 }).map((b) => {
-                  const selected = item.icon === b.icon;
+                  const targetIcon = `brand:${b.slug}`;
+                  const selected = item.icon === targetIcon;
                   return (
                     <button
                       key={b.id}
@@ -213,9 +215,9 @@ export function EditServiceModal(props: {
                       onClick={() => {
                         setItem((prev) => ({
                           ...prev,
-                          icon: b.icon,
+                          icon: targetIcon,
                           name: prev.name.trim() ? prev.name : b.name,
-                          url: !isFolder && !prev.url.trim() ? b.defaultUrl : prev.url,
+                          url: !isFolder && !prev.url.trim() && b.site_url ? b.site_url : prev.url,
                         }));
                       }}
                       style={{
@@ -230,9 +232,9 @@ export function EditServiceModal(props: {
                         cursor: "pointer",
                         color: "#1e293b",
                       }}
-                      title={`${b.name} (${b.defaultUrl})`}
+                      title={`${b.name}${b.source ? ` · 来源 ${b.source}` : ""}`}
                     >
-                      <IconBlock url={b.defaultUrl} name={b.name} icon={b.icon} size={20} className="ico-block" />
+                      <IconBlock url={b.site_url} name={b.name} icon={targetIcon} size={20} className="ico-block" />
                       <span style={{ fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>
                         {b.name}
                       </span>
@@ -261,19 +263,30 @@ export function EditServiceModal(props: {
 
           {iconTab === "custom" && (
             <div>
-              <div className="row" style={{ gap: 8 }}>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
                 <Input
-                  value={/^(https?:|\/api\/favicon)/.test(item.icon || "") ? item.icon! : ""}
+                  value={/^(https?:|\/|data:)/.test(item.icon || "") ? item.icon! : ""}
                   onChange={(e) => setItem({ ...item, icon: e.target.value || "globe" })}
-                  placeholder="粘贴图标 URL（可选）"
-                  style={{ flex: 1 }}
+                  placeholder="粘贴图片路径或 DataURL（可选）"
+                  style={{ flex: 1, minWidth: 160 }}
                 />
-                {!isFolder && faviconUrlForSite(item.url) && (
-                  <Button onClick={() => {
-                    const fav = faviconUrlForSite(item.url);
-                    if (fav) setItem({ ...item, icon: fav });
-                  }}>
-                    抓取网站图标
+                {!isFolder && /^https?:\/\//i.test(item.url.trim()) && (
+                  <Button
+                    loading={fetchingFavicon}
+                    onClick={async () => {
+                      setFetchingFavicon(true);
+                      try {
+                        const r = await api.fetchFavicon(item.url.trim());
+                        setItem((prev) => ({ ...prev, icon: r.dataUrl }));
+                        toast(`已抓取 ${r.host} 图标并转为本地数据`);
+                      } catch (e) {
+                        toast((e as Error).message, true);
+                      } finally {
+                        setFetchingFavicon(false);
+                      }
+                    }}
+                  >
+                    远程抓取
                   </Button>
                 )}
                 <input
@@ -391,9 +404,9 @@ export function EditServiceModal(props: {
             onPick={(entry) => {
               setItem((prev) => ({
                 ...prev,
-                icon: entry.icon,
+                icon: `brand:${entry.slug}`,
                 name: prev.name.trim() ? prev.name : entry.name,
-                url: !isFolder && !prev.url.trim() ? entry.defaultUrl : prev.url,
+                url: !isFolder && !prev.url.trim() && entry.site_url ? entry.site_url : prev.url,
               }));
             }}
           />

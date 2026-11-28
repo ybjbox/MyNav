@@ -3,6 +3,7 @@ import { Env, err, json, rateLimited, requireAdmin } from "./_shared";
 import * as h from "./handlers";
 import * as msTodo from "./mstodo";
 import * as ai from "./ai";
+import * as icons from "./icons";
 import { runScheduled, stalenessAlert, CRON_STALE, CRON_DAILY } from "./scheduled";
 
 function withSecurityHeaders(res: Response): Response {
@@ -75,7 +76,15 @@ const ROUTES: Record<string, Partial<Record<string, (req: Request, env: Env) => 
   "/api/ai/models": { GET: ai.getAiModels },
   "/api/ai/usage": { GET: ai.getAiUsage },
   "/api/ai/diagnose": { POST: ai.aiDiagnose },
-  "/api/favicon": { GET: (req) => h.favicon(req) },
+  "/api/icons": {
+    GET: icons.listIcons,
+    POST: icons.createIcon,
+    PUT: icons.updateIcon,
+    DELETE: icons.deleteIcon,
+  },
+  "/api/icons/reset": { POST: icons.resetIcons },
+  "/api/icons/migrate": { POST: icons.migrateIcons },
+  "/api/favicon": { GET: h.fetchFavicon },
 };
 
 export default {

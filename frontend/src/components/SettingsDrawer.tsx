@@ -1,5 +1,5 @@
-/* 统一设置中心（WeTab / HyperOS 双栏模态框，Ant Design 控件）：外观与壁纸 / 搜索引擎 / 组件库 / 图标库 / 设备监控 / 数据管理 / 账户安全 */
-import { useEffect, useState } from "react";
+/* 统一设置中心（WeTab / HyperOS 双栏模态框，Ant Design 控件）：外观与壁纸 / 搜索引擎 / 组件库 / 图标库 / 设备监控 / AI 诊断 / 数据管理 / 账户安全 */
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, ColorPicker, Input, InputNumber, Popconfirm, Segmented, Select, Switch } from "antd";
 import { closestCenter, DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -90,50 +90,52 @@ function SortableEngineRow(props: {
   return (
     <div
       ref={setNodeRef}
-      className="settings-row"
+      className="engine-row"
       style={{
-        gap: 8,
         transform: CSS.Translate.toString(transform),
         transition: isDragging ? "none" : transition,
         position: "relative",
         zIndex: isDragging ? 1 : 0,
         opacity: isDragging ? 0.28 : 1,
-        background: "#ffffff",
       }}
     >
-      <span
-        {...attributes}
-        {...listeners}
-        title="拖拽排序"
-        style={{ display: "inline-flex", color: isDragging ? "var(--accent)" : "#94a3b8", cursor: isDragging ? "grabbing" : "grab", flexShrink: 0, touchAction: "none" }}
-      >
-        <IconGrip size={15} />
-      </span>
-      <Input
-        value={eng.name}
-        onChange={(e) => props.onUpdate({ name: e.target.value })}
-        placeholder="名称"
-        style={{ width: 100, flexShrink: 0 }}
-      />
-      <Input
-        value={eng.url}
-        onChange={(e) => props.onUpdate({ url: e.target.value })}
-        placeholder="https://example.com/search?q=%s"
-        style={{ flex: 1, maxWidth: "none" }}
-      />
-      <Button size="small" icon={<IconUp size={12} />} disabled={isFirst} title="上移" onClick={props.onMoveUp} />
-      <Button size="small" icon={<IconDown size={12} />} disabled={isLast} title="下移" onClick={props.onMoveDown} />
-      <Button size="small" type={isDef ? "primary" : "default"} onClick={props.onSetDefault}>
-        {isDef ? "默认" : "设为默认"}
-      </Button>
-      <Button
-        size="small"
-        danger
-        icon={<IconTrash size={13} />}
-        disabled={!canDelete}
-        title={!canDelete ? "至少保留一个引擎" : "删除"}
-        onClick={props.onRemove}
-      />
+      <div className="engine-fields">
+        <span
+          {...attributes}
+          {...listeners}
+          title="拖拽排序"
+          style={{ display: "inline-flex", color: isDragging ? "var(--accent)" : "#94a3b8", cursor: isDragging ? "grabbing" : "grab", flexShrink: 0, touchAction: "none" }}
+        >
+          <IconGrip size={15} />
+        </span>
+        <Input
+          value={eng.name}
+          onChange={(e) => props.onUpdate({ name: e.target.value })}
+          placeholder="名称"
+          style={{ width: 96, flexShrink: 0 }}
+        />
+        <Input
+          value={eng.url}
+          onChange={(e) => props.onUpdate({ url: e.target.value })}
+          placeholder="https://example.com/search?q=%s"
+          style={{ flex: 1, minWidth: 160 }}
+        />
+      </div>
+      <div className="engine-actions">
+        <Button size="small" icon={<IconUp size={12} />} disabled={isFirst} title="上移" onClick={props.onMoveUp} />
+        <Button size="small" icon={<IconDown size={12} />} disabled={isLast} title="下移" onClick={props.onMoveDown} />
+        <Button size="small" type={isDef ? "primary" : "default"} onClick={props.onSetDefault}>
+          {isDef ? "默认" : "设为默认"}
+        </Button>
+        <Button
+          size="small"
+          danger
+          icon={<IconTrash size={13} />}
+          disabled={!canDelete}
+          title={!canDelete ? "至少保留一个引擎" : "删除"}
+          onClick={props.onRemove}
+        />
+      </div>
     </div>
   );
 }
@@ -172,6 +174,9 @@ export function SettingsDrawer(props: {
   const [newEngineName, setNewEngineName] = useState("");
   const [newEngineUrl, setNewEngineUrl] = useState("");
   const [activeEngineId, setActiveEngineId] = useState<string | null>(null);
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [accBusy, setAccBusy] = useState(false);
+  const importFileRef = useRef<HTMLInputElement>(null);
   const engineSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 3 } }));
 
   useEffect(() => {
@@ -290,11 +295,14 @@ export function SettingsDrawer(props: {
       search: { ...draft.search, engines, default: defaultId },
       monitor: draft.monitor,
     };
+    setSavingConfig(true);
     try {
       await saveConfig(nextDraft);
       props.onSaved?.(nextDraft);
     } catch (e) {
       toast(`保存失败：${(e as Error).message}`, true);
+    } finally {
+      setSavingConfig(false);
     }
   };
 
@@ -382,8 +390,8 @@ export function SettingsDrawer(props: {
   };
 
   useEffect(() => {
-    if (username && !newAccUser) setNewAccUser(username);
-  }, [username, newAccUser]);
+    if (props.open && username) setNewAccUser(username);
+  }, [props.open, username]);
 
   const doChangeAccount = async () => {
     const trimmedUser = newAccUser.trim();
@@ -392,6 +400,7 @@ export function SettingsDrawer(props: {
     if (!userChanged && !pwNew) { toast("请填写新账号或新密码", true); return; }
     if (pwNew && pwNew !== pwNew2) { toast("两次输入的新密码不一致", true); return; }
     if (pwNew && pwNew.length < 6) { toast("新密码至少 6 位", true); return; }
+    setAccBusy(true);
     try {
       const nextName = await updateAccount({
         currentPassword: pwOld,
@@ -403,8 +412,18 @@ export function SettingsDrawer(props: {
       setPwOld(""); setPwNew(""); setPwNew2("");
     } catch (e) {
       toast(`修改失败：${(e as Error).message}`, true);
+    } finally {
+      setAccBusy(false);
     }
   };
+
+  const isConfigTab = tab === "appearance" || tab === "search" || tab === "monitor" || tab === "ai";
+  const isDirty = useMemo(
+    () =>
+      JSON.stringify({ site: draft.site, privacy: draft.privacy, search: draft.search, monitor: draft.monitor }) !==
+      JSON.stringify({ site: config.site, privacy: config.privacy, search: config.search, monitor: config.monitor }),
+    [draft.site, draft.privacy, draft.search, draft.monitor, config.site, config.privacy, config.search, config.monitor],
+  );
 
   const th = draft.monitor.thresholds;
   const sa: NonNullable<NavConfig["monitor"]["staleAlert"]> = {
@@ -457,6 +476,13 @@ export function SettingsDrawer(props: {
             </div>
 
             <div className="settings-body-scroll">
+              {isConfigTab && !authed && (
+                <div className="settings-banner">
+                  <span>当前为访客预览模式：调整外观可实时预览，登录后才能保存同步到云端。</span>
+                  <Button size="small" type="primary" onClick={() => setTab("account")}>去登录</Button>
+                </div>
+              )}
+
               {tab === "appearance" && (
                 <>
                   <div className="settings-card">
@@ -519,23 +545,28 @@ export function SettingsDrawer(props: {
                             key={w.id}
                             type="button"
                             className={`wp${(draft.site.wallpaper ?? "none") === w.id ? " on" : ""}`}
-                            style={{ background: w.css || "var(--surface)", backgroundSize: w.id === "grid" ? "12px 12px" : undefined }}
+                            style={{ background: w.css || "#eef2f6", backgroundSize: w.id === "grid" ? "12px 12px" : undefined }}
                             title={w.name}
                             aria-label={`壁纸 ${w.name}`}
                             onClick={() => patchSite({ wallpaper: w.id === "none" ? null : w.id })}
-                          />
+                          >
+                            <span className="wp-label">{w.name}</span>
+                          </button>
                         ))}
                       </div>
                       <Input
                         value={/^https?:/.test(draft.site.wallpaper || "") ? draft.site.wallpaper! : ""}
                         onChange={(e) => patchSite({ wallpaper: e.target.value || null })}
-                        placeholder="或粘贴壁纸图片 URL（可选）"
+                        placeholder="或粘贴自定义壁纸图片 URL（可选）"
                         style={{ marginTop: 10 }}
                       />
                     </div>
                     <div className="settings-row">
-                      <label>卡片图标尺寸与圆角</label>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div>
+                        <label>卡片图标尺寸与圆角</label>
+                        <div className="sr-desc">实时预览桌面导航图标大小与圆角半径</div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <Segmented
                           value={draft.site.iconSize}
                           onChange={(v) => patchSite({ iconSize: v as NavConfig["site"]["iconSize"] })}
@@ -548,10 +579,11 @@ export function SettingsDrawer(props: {
                         <InputNumber
                           min={4}
                           max={20}
+                          addonAfter="px"
                           value={draft.site.iconRadius}
                           onChange={(v) => patchSite({ iconRadius: Number(v) || 12 })}
                           title="图标块圆角 px"
-                          style={{ width: 76 }}
+                          style={{ width: 96 }}
                         />
                       </div>
                     </div>
@@ -560,7 +592,10 @@ export function SettingsDrawer(props: {
                   <div className="settings-card">
                     <div className="settings-block" style={{ padding: "14px 18px", borderBottom: "1px solid rgba(16,26,36,0.06)" }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
-                        <label style={{ fontSize: 14, fontWeight: 500, color: "#1e293b" }}>天气小组件</label>
+                        <div>
+                          <label style={{ fontSize: 14, fontWeight: 500, color: "#1e293b" }}>天气小组件</label>
+                          <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>在首页时钟区显示城市实时天气与预报</div>
+                        </div>
                         <Switch
                           checked={draft.site.weather.enabled}
                           onChange={(checked) => patchSite({ weather: { ...draft.site.weather, enabled: checked } })}
@@ -568,12 +603,12 @@ export function SettingsDrawer(props: {
                       </div>
                       {draft.site.weather.enabled && (
                         <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-                          <div style={{ display: "flex", gap: 8 }}>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                             <Input
                               value={draft.site.weather.city}
                               onChange={(e) => patchSite({ weather: { ...draft.site.weather, city: e.target.value } })}
-                              placeholder="城市名（如：深圳）"
-                              style={{ flex: 1 }}
+                              placeholder="城市名（如：南宁）"
+                              style={{ flex: 1, minWidth: 140 }}
                             />
                             <Select
                               value={draft.site.weather.provider}
@@ -603,17 +638,15 @@ export function SettingsDrawer(props: {
                       )}
                     </div>
                     <div className="settings-row">
-                      <label>未登录访客可看导航卡片（关闭 = 全站需登录）</label>
+                      <div>
+                        <label>未登录访客可看导航卡片</label>
+                        <div className="sr-desc">关闭后访问首页直接要求账号登录（设备监控无论开关均需登录）</div>
+                      </div>
                       <Switch
                         checked={draft.privacy.publicNav}
                         onChange={(checked) => setDraft((d) => ({ ...d, privacy: { publicNav: checked } }))}
                       />
                     </div>
-                  </div>
-
-                  <div className="formfoot">
-                    <Button onClick={() => setDraft(cloneConfig(config))}>还原</Button>
-                    <Button type="primary" onClick={doSave}>保存设置</Button>
                   </div>
                 </>
               )}
@@ -684,11 +717,9 @@ export function SettingsDrawer(props: {
                           const isDef = draft.search.default === eng.id;
                           return (
                             <div
-                              className="settings-row"
+                              className="engine-row"
                               style={{
-                                gap: 8,
                                 pointerEvents: "none",
-                                background: "#ffffff",
                                 borderRadius: 12,
                                 border: "1.5px solid var(--accent)",
                                 boxShadow: "0 14px 32px rgba(15, 23, 42, 0.18)",
@@ -696,17 +727,21 @@ export function SettingsDrawer(props: {
                                 cursor: "grabbing",
                               }}
                             >
-                              <span style={{ display: "inline-flex", color: "var(--accent)", flexShrink: 0 }}>
-                                <IconGrip size={15} />
-                              </span>
-                              <Input value={eng.name} readOnly style={{ width: 100, flexShrink: 0 }} />
-                              <Input value={eng.url} readOnly style={{ flex: 1, maxWidth: "none" }} />
-                              <Button size="small" icon={<IconUp size={12} />} />
-                              <Button size="small" icon={<IconDown size={12} />} />
-                              <Button size="small" type={isDef ? "primary" : "default"}>
-                                {isDef ? "默认" : "设为默认"}
-                              </Button>
-                              <Button size="small" danger icon={<IconTrash size={13} />} />
+                              <div className="engine-fields">
+                                <span style={{ display: "inline-flex", color: "var(--accent)", flexShrink: 0 }}>
+                                  <IconGrip size={15} />
+                                </span>
+                                <Input value={eng.name} readOnly style={{ width: 96, flexShrink: 0 }} />
+                                <Input value={eng.url} readOnly style={{ flex: 1, minWidth: 160 }} />
+                              </div>
+                              <div className="engine-actions">
+                                <Button size="small" icon={<IconUp size={12} />} />
+                                <Button size="small" icon={<IconDown size={12} />} />
+                                <Button size="small" type={isDef ? "primary" : "default"}>
+                                  {isDef ? "默认" : "设为默认"}
+                                </Button>
+                                <Button size="small" danger icon={<IconTrash size={13} />} />
+                              </div>
                             </div>
                           );
                         })() : null}
@@ -760,11 +795,6 @@ export function SettingsDrawer(props: {
                       </div>
                     </div>
                   </div>
-
-                  <div className="formfoot">
-                    <Button onClick={() => setDraft(cloneConfig(config))}>还原</Button>
-                    <Button type="primary" onClick={doSave}>保存设置</Button>
-                  </div>
                 </>
               )}
 
@@ -794,39 +824,62 @@ export function SettingsDrawer(props: {
 
               {tab === "monitor" && (
                 <>
-                  <div className="formhint" style={{ marginBottom: 10 }}>阈值同时用于界面高亮与采集器告警推送</div>
                   <div className="settings-card">
+                    <div className="settings-card-title">告警阈值与趋势采样（同时下发至路由器采集器）</div>
                     <div className="settings-row">
-                      <label>CPU 告警阈值（%）</label>
-                      <InputNumber min={1} max={100} value={th.cpu} onChange={(v) => patchMon({ cpu: Number(v) || 0 })} />
+                      <div>
+                        <label>CPU 告警阈值</label>
+                        <div className="sr-desc">持续高负载达到采样次数时触发警告</div>
+                      </div>
+                      <InputNumber min={1} max={100} addonAfter="%" value={th.cpu} onChange={(v) => patchMon({ cpu: Number(v) || 0 })} style={{ width: 124 }} />
                     </div>
                     <div className="settings-row">
-                      <label>内存告警阈值（%）</label>
-                      <InputNumber min={1} max={100} value={th.mem} onChange={(v) => patchMon({ mem: Number(v) || 0 })} />
+                      <div>
+                        <label>内存告警阈值</label>
+                        <div className="sr-desc">路由器与 NAS 内存占用告警线</div>
+                      </div>
+                      <InputNumber min={1} max={100} addonAfter="%" value={th.mem} onChange={(v) => patchMon({ mem: Number(v) || 0 })} style={{ width: 124 }} />
                     </div>
                     <div className="settings-row">
-                      <label>磁盘告警阈值（%）</label>
-                      <InputNumber min={1} max={100} value={th.disk} onChange={(v) => patchMon({ disk: Number(v) || 0 })} />
+                      <div>
+                        <label>磁盘告警阈值</label>
+                        <div className="sr-desc">按挂载盘中最高占用率判定</div>
+                      </div>
+                      <InputNumber min={1} max={100} addonAfter="%" value={th.disk} onChange={(v) => patchMon({ disk: Number(v) || 0 })} style={{ width: 124 }} />
                     </div>
                     <div className="settings-row">
-                      <label>离线判定（连续失败次数）</label>
-                      <InputNumber min={1} max={60} value={th.downMinutes} onChange={(v) => patchMon({ downMinutes: Number(v) || 1 })} />
+                      <div>
+                        <label>离线判定阈值</label>
+                        <div className="sr-desc">服务或设备连续探活失败多少次后标记离线</div>
+                      </div>
+                      <InputNumber min={1} max={60} addonAfter="次" value={th.downMinutes} onChange={(v) => patchMon({ downMinutes: Number(v) || 1 })} style={{ width: 124 }} />
                     </div>
                     <div className="settings-row">
-                      <label>温度告警阈值（°C）</label>
-                      <InputNumber min={20} max={120} value={th.temp} onChange={(v) => patchMon({ temp: Number(v) || 0 })} />
+                      <div>
+                        <label>温度告警阈值</label>
+                        <div className="sr-desc">CPU / 主板传感器过热告警上限</div>
+                      </div>
+                      <InputNumber min={20} max={120} addonAfter="°C" value={th.temp} onChange={(v) => patchMon({ temp: Number(v) || 0 })} style={{ width: 124 }} />
                     </div>
                     <div className="settings-row">
-                      <label>连接数告警阈值（conntrack / Clash 连接）</label>
-                      <InputNumber min={100} step={1000} value={th.conn} onChange={(v) => patchMon({ conn: Number(v) || 0 })} />
+                      <div>
+                        <label>连接数告警阈值</label>
+                        <div className="sr-desc">conntrack 活动连接或 Clash 连接数上限</div>
+                      </div>
+                      <InputNumber min={100} step={1000} addonAfter="条" value={th.conn} onChange={(v) => patchMon({ conn: Number(v) || 0 })} style={{ width: 148 }} />
                     </div>
                     <div className="settings-row">
-                      <label>迷你曲线窗口（分钟）</label>
+                      <div>
+                        <label>迷你曲线时间窗口</label>
+                        <div className="sr-desc">桌面监控卡片底部历史折线图展示范围</div>
+                      </div>
                       <InputNumber
                         min={5}
                         max={120}
+                        addonAfter="分钟"
                         value={draft.monitor.sparkMinutes}
                         onChange={(v) => setDraft((d) => ({ ...d, monitor: { ...d.monitor, sparkMinutes: Number(v) || 30 } }))}
+                        style={{ width: 132 }}
                       />
                     </div>
                   </div>
@@ -836,8 +889,8 @@ export function SettingsDrawer(props: {
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
                         <div>
                           <div style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>失联告警（云端 Cron）</div>
-                          <div className="formhint" style={{ marginTop: 2 }}>
-                            采集器停止推送超过 10 分钟时，由 Cloudflare Workers 定时任务直接推送通知；恢复时推送"已恢复"
+                          <div className="formhint" style={{ marginTop: 2, marginBottom: 0 }}>
+                            采集器停止推送超过 10 分钟时，由 Cloudflare Workers 定时任务直接推送通知；恢复时推送“已恢复”
                           </div>
                         </div>
                         <Switch checked={sa.enabled} onChange={(checked) => patchStale({ enabled: checked })} />
@@ -845,31 +898,26 @@ export function SettingsDrawer(props: {
                     </div>
                     {sa.enabled && (
                       <>
-                        <div className="settings-row">
-                          <label>Bark（iOS）</label>
-                          <div style={{ display: "flex", gap: 8 }}>
-                            <Input value={sa.bark.url} onChange={(e) => patchStale({ bark: { ...sa.bark, url: e.target.value } })} placeholder="https://api.day.app" />
-                            <Input value={sa.bark.key} onChange={(e) => patchStale({ bark: { ...sa.bark, key: e.target.value } })} placeholder="设备 key" />
+                        <div className="settings-block" style={{ borderBottom: "1px solid rgba(16,26,36,0.06)", gap: 8 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>Bark（iOS 推送）</div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <Input value={sa.bark.url} onChange={(e) => patchStale({ bark: { ...sa.bark, url: e.target.value } })} placeholder="服务器地址（如 https://api.day.app）" style={{ flex: 1, minWidth: 180 }} />
+                            <Input value={sa.bark.key} onChange={(e) => patchStale({ bark: { ...sa.bark, key: e.target.value } })} placeholder="设备 Key" style={{ flex: 1, minWidth: 160 }} />
                           </div>
                         </div>
-                        <div className="settings-row">
-                          <label>Telegram Bot</label>
-                          <div style={{ display: "flex", gap: 8 }}>
-                            <Input value={sa.telegram.token} onChange={(e) => patchStale({ telegram: { ...sa.telegram, token: e.target.value } })} placeholder="bot token" />
-                            <Input value={sa.telegram.chatId} onChange={(e) => patchStale({ telegram: { ...sa.telegram, chatId: e.target.value } })} placeholder="chat id" />
+                        <div className="settings-block" style={{ borderBottom: "1px solid rgba(16,26,36,0.06)", gap: 8 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>Telegram Bot</div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <Input.Password value={sa.telegram.token} onChange={(e) => patchStale({ telegram: { ...sa.telegram, token: e.target.value } })} placeholder="Bot Token" style={{ flex: 1, minWidth: 180 }} />
+                            <Input value={sa.telegram.chatId} onChange={(e) => patchStale({ telegram: { ...sa.telegram, chatId: e.target.value } })} placeholder="Chat ID" style={{ flex: 1, minWidth: 140 }} />
                           </div>
                         </div>
-                        <div className="settings-row">
-                          <label>通用 Webhook URL</label>
-                          <Input value={sa.webhook.url} onChange={(e) => patchStale({ webhook: { ...sa.webhook, url: e.target.value } })} placeholder="https://…" style={{ maxWidth: 260 }} />
+                        <div className="settings-block" style={{ gap: 8 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b" }}>通用 Webhook</div>
+                          <Input value={sa.webhook.url} onChange={(e) => patchStale({ webhook: { ...sa.webhook, url: e.target.value } })} placeholder="https://example.com/webhook（支持飞书 / 企业微信 / 钉钉）" />
                         </div>
                       </>
                     )}
-                  </div>
-
-                  <div className="formfoot">
-                    <Button onClick={() => setDraft(cloneConfig(config))}>还原</Button>
-                    <Button type="primary" onClick={doSave}>保存设置</Button>
                   </div>
                 </>
               )}
@@ -1021,7 +1069,7 @@ export function SettingsDrawer(props: {
                             showSearch
                             optionFilterProp="label"
                             value={activeId}
-                            style={{ minWidth: 260, maxWidth: 380 }}
+                            style={{ width: "100%", maxWidth: 340 }}
                             options={catalog.map(formatAiModelOption)}
                             onChange={(v) => setDraft((d) => ({ ...d, monitor: { ...d.monitor, aiModel: v } }))}
                           />
@@ -1110,11 +1158,6 @@ export function SettingsDrawer(props: {
                           </div>
                         )}
                       </div>
-
-                      <div className="formfoot">
-                        <Button onClick={() => setDraft(cloneConfig(config))}>还原</Button>
-                        <Button type="primary" onClick={doSave}>保存设置</Button>
-                      </div>
                     </>
                   );
                 })()
@@ -1122,40 +1165,79 @@ export function SettingsDrawer(props: {
 
               {tab === "data" && (
                 <>
+                  {!authed && (
+                    <div className="settings-banner">
+                      <span>当前为访客模式：仅支持导出公开配置；导入或恢复默认需管理员登录。</span>
+                      <Button size="small" type="primary" onClick={() => setTab("account")}>去登录</Button>
+                    </div>
+                  )}
                   <div className="settings-card">
                     <div className="settings-row">
-                      <label>导出配置</label>
+                      <div>
+                        <label>导出配置</label>
+                        <div className="sr-desc">下载当前完整配置备份（JSON 文件，含分组、卡片与组件布局）</div>
+                      </div>
                       <Button icon={<IconDownload size={14} />} onClick={doExport}>下载 nav-config.json</Button>
                     </div>
                     <div className="settings-block" style={{ padding: "14px 18px" }}>
-                      <label style={{ display: "block", fontSize: 14, fontWeight: 500, color: "#1e293b", marginBottom: 8 }}>导入配置（粘贴 JSON）</label>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                        <div>
+                          <label style={{ display: "block", fontSize: 14, fontWeight: 500, color: "#1e293b" }}>导入配置</label>
+                          <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>可直接选择导出的 JSON 文件，或粘贴 JSON 文本后保存覆盖云端配置</div>
+                        </div>
+                        <input
+                          ref={importFileRef}
+                          type="file"
+                          accept=".json,application/json"
+                          style={{ display: "none" }}
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) {
+                              const reader = new FileReader();
+                              reader.onload = () => setImportText(String(reader.result || ""));
+                              reader.readAsText(f);
+                            }
+                            e.target.value = "";
+                          }}
+                        />
+                        <Button size="small" disabled={!authed} icon={<IconUpload size={13} />} onClick={() => importFileRef.current?.click()}>
+                          选择 JSON 文件
+                        </Button>
+                      </div>
                       <Input.TextArea
                         rows={4}
+                        disabled={!authed}
                         value={importText}
                         onChange={(e) => setImportText(e.target.value)}
                         placeholder='{"site": …, "groups": […]}'
                       />
-                      <Button style={{ marginTop: 8 }} icon={<IconUpload size={14} />} disabled={!importText.trim()} onClick={doImport}>
-                        导入并保存
-                      </Button>
+                      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                        <Button type="primary" icon={<IconUpload size={14} />} disabled={!authed || !importText.trim()} onClick={doImport}>
+                          导入并保存
+                        </Button>
+                      </div>
                     </div>
                   </div>
 
                   <div className="settings-card">
                     <div className="settings-row">
-                      <label>危险操作</label>
+                      <div>
+                        <label>恢复默认配置</label>
+                        <div className="sr-desc">将分组、服务卡片、组件和外观配置重置为初始默认状态</div>
+                      </div>
                       <Popconfirm
                         title="确定恢复默认配置？"
                         description="当前所有分组和卡片配置将被覆盖。"
                         okText="确定恢复"
                         cancelText="取消"
                         okButtonProps={{ danger: true }}
+                        disabled={!authed}
                         onConfirm={async () => {
                           await resetConfig();
                           toast("已恢复默认配置");
                         }}
                       >
-                        <Button danger icon={<IconTrash size={14} />}>
+                        <Button danger disabled={!authed} icon={<IconTrash size={14} />}>
                           恢复默认配置
                         </Button>
                       </Popconfirm>
@@ -1333,13 +1415,17 @@ export function SettingsDrawer(props: {
                     </div>
                     <div className="settings-row">
                       <label>确认新密码</label>
-                      <Input.Password value={pwNew2} onChange={(e) => setPwNew2(e.target.value)} placeholder="再次输入新密码" style={{ maxWidth: 240 }} />
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                        <Input.Password value={pwNew2} status={pwNew && pwNew2 && pwNew !== pwNew2 ? "error" : undefined} onChange={(e) => setPwNew2(e.target.value)} placeholder="再次输入新密码" style={{ maxWidth: 240 }} />
+                        {pwNew && pwNew2 && pwNew !== pwNew2 && <span style={{ fontSize: 11.5, color: "#dc2626" }}>两次输入的新密码不一致</span>}
+                      </div>
                     </div>
                     <div className="settings-block" style={{ padding: "14px 18px" }}>
                       <div className="formfoot" style={{ margin: 0 }}>
                         <Button
                           type="primary"
-                          disabled={!pwOld || (!pwNew && (!newAccUser.trim() || newAccUser.trim() === (username || "")))}
+                          loading={accBusy}
+                          disabled={!pwOld || (!!pwNew && pwNew !== pwNew2) || (!pwNew && (!newAccUser.trim() || newAccUser.trim() === (username || "")))}
                           onClick={doChangeAccount}
                         >
                           保存账号设置
@@ -1353,6 +1439,26 @@ export function SettingsDrawer(props: {
                 </>
               )}
             </div>
+
+            {isConfigTab && (
+              <div className="settings-foot">
+                <div>
+                  {isDirty ? (
+                    <span className="dirty-pill">有未保存修改{!authed ? "（仅预览）" : ""}</span>
+                  ) : (
+                    <span className="clean-hint">所有修改已同步至当前配置</span>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Button disabled={!isDirty || savingConfig} onClick={() => setDraft(cloneConfig(config))}>
+                    还原
+                  </Button>
+                  <Button type="primary" loading={savingConfig} disabled={!authed || !isDirty} onClick={() => void doSave()}>
+                    保存设置
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -933,7 +933,7 @@ export async function putTodos(req: Request, env: Env): Promise<Response> {
   return json({ ok: true, todos: cleaned, updatedAt });
 }
 
-/* ---------- /api/favicon（实时获取并缓存对应网站实际图标；拒绝内网/保留主机防 SSRF） ---------- */
+/* ---------- /api/favicon（仅作管理端新增/编辑图标时的可选远程抓取辅助，抓回后转为 Base64 存入自维护数据库） ---------- */
 function extractPublicFaviconHost(raw: string): string | null {
   const s = raw.trim();
   if (!s || s.length > 512) return null;
@@ -973,21 +973,22 @@ function extractPublicFaviconHost(raw: string): string | null {
   return host;
 }
 
-export async function favicon(req: Request): Promise<Response> {
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
+}
+
+export async function fetchFavicon(req: Request, env: Env): Promise<Response> {
+  const { authed } = await requireAdmin(req, env);
+  if (!authed) return err(401, "未登录");
+  if (await rateLimited(env, req, "rl:favicon", 60)) return err(429, "抓取过于频繁，请稍后再试");
+
   const u = new URL(req.url);
   const host = extractPublicFaviconHost(u.searchParams.get("url") || u.searchParams.get("domain") || "");
-  if (!host) return new Response(null, { status: 404, headers: { "cache-control": "public, max-age=3600" } });
-
-  const cache = (caches as unknown as { default?: Cache }).default;
-  const cacheKey = new Request(`https://favicon.cache.internal/v1/${host}`);
-  if (cache) {
-    try {
-      const hit = await cache.match(cacheKey);
-      if (hit) return hit;
-    } catch {
-      /* 忽略缓存异常 */
-    }
-  }
+  if (!host) return err(400, "请输入有效的公网网址或域名（不支持内网地址）");
 
   const bareHost = host.startsWith("www.") ? host.slice(4) : host;
   const candidates = Array.from(new Set([
@@ -1001,35 +1002,23 @@ export async function favicon(req: Request): Promise<Response> {
   for (const upstream of candidates) {
     try {
       const r = await fetch(upstream, {
-        headers: { "user-agent": "MyNav-Favicon/1.0" },
-        signal: AbortSignal.timeout(4000),
+        headers: { "user-agent": "MyNav-FaviconFetch/1.0" },
+        signal: AbortSignal.timeout(4500),
       });
       if (r.status !== 200) continue;
-      const ct = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
-      if (!ct.startsWith("image/") && ct !== "application/octet-stream") continue;
+      const rawCt = (r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+      if (!rawCt.startsWith("image/") && rawCt !== "application/octet-stream") continue;
       const buf = await r.arrayBuffer();
-      if (buf.byteLength < 64 || buf.byteLength > 512 * 1024) continue;
-      const res = new Response(buf, {
-        status: 200,
-        headers: {
-          "content-type": ct.startsWith("image/") ? ct : "image/x-icon",
-          "cache-control": "public, max-age=604800",
-        },
-      });
-      if (cache) {
-        try {
-          await cache.put(cacheKey, res.clone());
-        } catch {
-          /* 忽略缓存写入失败 */
-        }
-      }
-      return res;
+      if (buf.byteLength < 64 || buf.byteLength > 128 * 1024) continue;
+      const mime = rawCt.startsWith("image/") ? rawCt : "image/x-icon";
+      const dataUrl = `data:${mime};base64,${bytesToBase64(new Uint8Array(buf))}`;
+      return json({ ok: true, host, mime_type: mime, dataUrl });
     } catch {
       /* 尝试下一个图标源 */
     }
   }
 
-  return new Response(null, { status: 404, headers: { "cache-control": "public, max-age=3600" } });
+  return err(404, `未能从 ${host} 抓取到图标，请改用本地上传裁剪`);
 }
 
 /* ---------- 公共 ---------- */

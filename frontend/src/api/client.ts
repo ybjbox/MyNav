@@ -214,6 +214,56 @@ export const api = {
       }
     }
   },
+  getIcons: () =>
+    req<{
+      icons: {
+        id: string;
+        slug: string;
+        name: string;
+        category: string;
+        source: string;
+        site_url: string;
+        color: string;
+        mime_type: string;
+        icon_content: string;
+        builtin: boolean;
+        created_at: number;
+        updated_at: number;
+      }[];
+      total: number;
+      storage: string;
+    }>("/api/icons"),
+  createIcon: (payload: {
+    name: string;
+    category: string;
+    source: string;
+    site_url: string;
+    color: string;
+    icon_content: string;
+    slug?: string;
+  }) => req<{ ok: true; icon: Record<string, unknown> }>("/api/icons", { method: "POST", body: JSON.stringify(payload) }),
+  updateIcon: (payload: {
+    id: string;
+    name: string;
+    category: string;
+    source: string;
+    site_url: string;
+    color: string;
+    icon_content: string;
+  }) => req<{ ok: true; icon: Record<string, unknown> }>("/api/icons", { method: "PUT", body: JSON.stringify(payload) }),
+  deleteIcon: (id: string) =>
+    req<{ ok: true; deleted: number }>(`/api/icons?id=${encodeURIComponent(id)}`, { method: "DELETE" }),
+  resetIcons: () =>
+    req<{ ok: true; icons: unknown[]; total: number }>("/api/icons/reset", { method: "POST" }),
+  migrateIcons: (icons: unknown[]) =>
+    req<{ ok: true; imported: number; icons: unknown[] }>("/api/icons/migrate", {
+      method: "POST",
+      body: JSON.stringify({ icons }),
+    }),
+  fetchFavicon: (url: string) =>
+    req<{ ok: true; host: string; mime_type: string; dataUrl: string }>(
+      `/api/favicon?url=${encodeURIComponent(url)}`,
+    ),
 };
 
 export function isUnauthorized(e: unknown): boolean {

@@ -58,3 +58,20 @@ CREATE TABLE IF NOT EXISTS users (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+-- 自维护本地图标库（整理常用网站图标入库，保存名称、分类、来源、关联站点与本地图标内容）
+CREATE TABLE IF NOT EXISTS icon_library (
+  id TEXT PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL,
+  source TEXT NOT NULL,
+  site_url TEXT NOT NULL DEFAULT '',
+  color TEXT NOT NULL DEFAULT '#3261e3',
+  mime_type TEXT NOT NULL DEFAULT 'image/png',
+  icon_content TEXT NOT NULL,
+  builtin INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_icon_library_cat ON icon_library (category, slug);

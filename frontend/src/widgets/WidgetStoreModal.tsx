@@ -81,8 +81,8 @@ function WidgetPreviewBox({ m, authed }: { m: WidgetManifest; authed: boolean })
     <div className="wstore-preview" aria-hidden="true">
       <div
         style={{
-          width: "130%",
-          height: "130%",
+          width: "128%",
+          height: "128%",
           transform: "scale(0.76)",
           transformOrigin: "center center",
           display: "flex",
@@ -158,7 +158,7 @@ export function WidgetStoreModal(props: {
 
               <WidgetPreviewBox m={m} authed={authed} />
 
-              <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.4 }}>{m.desc}</div>
+              <div style={{ fontSize: 12.5, color: "#64748b", lineHeight: 1.45 }}>{m.desc}</div>
 
               <Segmented
                 size="small"

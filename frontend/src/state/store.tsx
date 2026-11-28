@@ -4,6 +4,7 @@ import { api, isUnauthorized } from "../api/client";
 import { defaultConfig, cloneConfig } from "../lib/defaultConfig";
 import { mockSnapshot } from "../lib/mock";
 import { wallpaperImage } from "../lib/wallpapers";
+import { refreshIconLibraryFromDb } from "../lib/iconLibrary";
 import type { NavConfig, Snapshot, HistoryResp } from "../types";
 
 export interface Toast { id: number; text: string; err?: boolean }
@@ -150,7 +151,10 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        await loadConfig();
+        await Promise.all([
+          loadConfig(),
+          refreshIconLibraryFromDb().catch(() => []),
+        ]);
         const s = await api.session();
         setCollectorConfigured(s.collectorConfigured);
         setUsername(s.username || null);
